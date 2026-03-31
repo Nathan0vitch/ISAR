@@ -1,0 +1,15 @@
+# Librairies externes — pas besoin de les versionner
+include/glm/
+libraries/
+
+# Fichiers compilés Visual Studio
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+x64/
+Debug/
+Release/
+.vs/

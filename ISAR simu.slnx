@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="ISAR simu.vcxproj" Id="9ab6cf62-2bf9-4bfe-906a-8244d01ba5f1" />
+</Solution>

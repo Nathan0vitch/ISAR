@@ -1,0 +1,22 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "ISAR simu\\x64\\Debug\\glm.obj",
+            "outputs": [
+                "ISAR simu\\x64\\Debug\\glm.cppm.ifc.dt.module.json",
+                "ISAR simu\\x64\\Debug\\glm.cppm.ifc.dt.d.json",
+                "ISAR simu\\x64\\Debug\\glm.ifc"
+            ],
+            "provides": [
+                {
+                    "logical-name": "glm",
+                    "source-path": "c:\\users\\natha\\documents\\estaca\\p2i\\isar simu\\glm\\glm.cppm",
+                    "is-interface": true
+                }
+            ],
+            "requires": []
+        }
+    ]
+}
