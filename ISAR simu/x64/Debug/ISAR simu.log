@@ -1,8 +1,2 @@
 ﻿  Main.cpp
-glfw3.lib(input.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(input.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
-glfw3.lib(monitor.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(monitor.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
-glfw3.lib(window.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(window.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
-glfw3.lib(null_monitor.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(null_monitor.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
-glfw3.lib(win32_joystick.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_joystick.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
-glfw3.lib(win32_window.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_window.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
   ISAR simu.vcxproj -> C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\ISAR simu.exe
