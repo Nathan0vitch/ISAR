@@ -85,7 +85,7 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)include\glm;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)include\glm;$(SolutionDir)nrlmsise-00;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -115,7 +115,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)include\glm;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)include;$(SolutionDir)include\glm;$(SolutionDir)nrlmsise-00;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -148,6 +148,12 @@
     <ClCompile Include="src\dispersions\monte_carlo.cpp" />
     <ClCompile Include="src\mission\ground_track.cpp" />
     <ClCompile Include="src\mission\maneuver.cpp" />
+    <ClCompile Include="nrlmsise-00\nrlmsise-00.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="nrlmsise-00\nrlmsise-00_data.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
     <ClCompile Include="src\rendering\camera.cpp" />
     <ClCompile Include="src\rendering\renderer.cpp" />
     <ClCompile Include="src\simulation\atmosphere.cpp" />
@@ -170,6 +176,7 @@
     <ClInclude Include="include\simulation\orbit.h" />
     <ClInclude Include="include\simulation\physics.h" />
     <ClInclude Include="include\simulation\vehicle.h" />
+    <ClInclude Include="nrlmsise-00\nrlmsise-00.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
