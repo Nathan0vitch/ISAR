@@ -11,8 +11,9 @@ namespace physics {
 // Gravitational acceleration (km/s²) at ECI position (two-body + J2)
 glm::dvec3 gravity(const glm::dvec3& pos);
 
-// Drag force magnitude (N) given the current state and vehicle geometry
-double dragForce(const StateVec& s, const VehicleParams& vehicle);
+// Drag force magnitude (N) using NRLMSISE-00 density.
+// t: simulation time (s) — required for Earth-rotation-based lat/lon lookup.
+double dragForce(const StateVec& s, double t, const VehicleParams& vehicle);
 
 // Equations of motion: gravity + aerodynamic drag + thrust
 StateVec derivatives(const StateVec& s, double t,

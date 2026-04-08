@@ -28,6 +28,13 @@ endif()
 add_library(glad STATIC vendor/glad/src/glad.c)
 target_include_directories(glad PUBLIC vendor/glad/include)
 
+# NRLMSISE-00 empirical atmosphere model (pure C)
+add_library(nrlmsise00 STATIC
+    nrlmsise-00/nrlmsise-00.c
+    nrlmsise-00/nrlmsise-00_data.c
+)
+target_include_directories(nrlmsise00 PUBLIC nrlmsise-00)
+
 # ─── Sources ───────────────────────────────────────────────────────────────────
 set(SIM_SOURCES
     src/simulation/Physics.cpp
@@ -68,6 +75,7 @@ target_link_libraries(OrbitalSim PRIVATE
     glfw
     OpenGL::GL
     glm::glm
+    nrlmsise00
 )
 
 # ─── Definitions ───────────────────────────────────────────────────────────────

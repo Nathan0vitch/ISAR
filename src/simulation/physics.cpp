@@ -12,26 +12,42 @@ glm::dvec3 gravity(const glm::dvec3& pos)
     return -(constants::MU_EARTH / (r2 * r)) * pos;
 }
 
-double dragForce(const StateVec& s, const VehicleParams& vehicle)
+double dragForce(const StateVec& s, double t, const VehicleParams& vehicle)
 {
     glm::dvec3 vel = { s[3], s[4], s[5] };
     double v       = glm::length(vel) * 1000.0; // km/s → m/s
     glm::dvec3 pos = { s[0], s[1], s[2] };
-    double h       = glm::length(pos) - constants::R_EARTH; // km
-    double rho     = atmosphere::density(h);
-    return 0.5 * rho * vehicle.cd * vehicle.area * v * v;
+    double rho     = atmosphere::densityNRLMSISE(pos, t);
+    return 0.5 * rho * vehicle.cd * vehicle.area * v * v; // Newtons
 }
 
 StateVec derivatives(const StateVec& s, double t,
                      const VehicleParams& vehicle,
                      const glm::dvec3& thrustDir, double thrustMag)
 {
-    // TODO: add drag and thrust terms
-    (void)t; (void)vehicle; (void)thrustDir; (void)thrustMag;
-
     glm::dvec3 pos = { s[0], s[1], s[2] };
-    glm::dvec3 g   = gravity(pos);
-    return { s[3], s[4], s[5],  g.x, g.y, g.z };
+    glm::dvec3 vel = { s[3], s[4], s[5] };
+
+    // Gravitational acceleration (km/s²)
+    glm::dvec3 acc = gravity(pos);
+
+    // Aerodynamic drag — only when there is velocity
+    double v = glm::length(vel) * 1000.0; // m/s
+    if (v > 0.0) {
+        double F_drag = dragForce(s, t, vehicle);
+        // Convert N → km/s²: a = F/m [m/s²] / 1000
+        glm::dvec3 dragAcc = -(F_drag / vehicle.mass / 1000.0) * glm::normalize(vel);
+        acc += dragAcc;
+    }
+
+    // Thrust — only when magnitude is non-zero
+    if (thrustMag > 0.0) {
+        // thrustDir is a unit vector in ECI; thrustMag in N
+        glm::dvec3 thrustAcc = (thrustMag / vehicle.mass / 1000.0) * thrustDir;
+        acc += thrustAcc;
+    }
+
+    return { s[3], s[4], s[5], acc.x, acc.y, acc.z };
 }
 
 StateVec rk4Step(const StateVec& s, double t, double dt,

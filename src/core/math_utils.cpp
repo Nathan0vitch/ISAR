@@ -11,16 +11,44 @@ glm::dvec3 eciToEcef(const glm::dvec3& posEci, double gmst_rad)
 
 glm::dvec3 ecefToGeodetic(const glm::dvec3& ecef)
 {
-    // TODO: Bowring iterative method
-    (void)ecef;
-    return {};
+    // WGS-84 ellipsoid parameters (km)
+    const double a  = constants::R_EARTH;          // equatorial radius
+    const double b  = 6356.7523142;                // polar radius
+    const double e2 = 1.0 - (b * b) / (a * a);    // first eccentricity squared
+
+    double x = ecef.x, y = ecef.y, z = ecef.z;
+    double lon = std::atan2(y, x);
+    double p   = std::sqrt(x * x + y * y);
+
+    // Bowring iterative method (converges in ≤4 iterations to <0.1 mm)
+    double lat = std::atan2(z, p * (1.0 - e2));
+    for (int i = 0; i < 5; ++i) {
+        double sinLat = std::sin(lat);
+        double N = a / std::sqrt(1.0 - e2 * sinLat * sinLat);
+        lat = std::atan2(z + e2 * N * sinLat, p);
+    }
+
+    double sinLat = std::sin(lat), cosLat = std::cos(lat);
+    double N = a / std::sqrt(1.0 - e2 * sinLat * sinLat);
+    double alt = (std::abs(cosLat) > 1e-10) ? (p / cosLat - N)
+                                             : (std::abs(z) / std::abs(sinLat) - N * (1.0 - e2));
+
+    return { lat, lon, alt };
 }
 
 glm::dvec3 geodeticToEcef(double lat, double lon, double alt)
 {
-    // TODO
-    (void)lat; (void)lon; (void)alt;
-    return {};
+    const double a  = constants::R_EARTH;
+    const double b  = 6356.7523142;
+    const double e2 = 1.0 - (b * b) / (a * a);
+
+    double sinLat = std::sin(lat), cosLat = std::cos(lat);
+    double N = a / std::sqrt(1.0 - e2 * sinLat * sinLat);
+    return {
+        (N + alt) * cosLat * std::cos(lon),
+        (N + alt) * cosLat * std::sin(lon),
+        (N * (1.0 - e2) + alt) * sinLat
+    };
 }
 
 double gmst(double t)
