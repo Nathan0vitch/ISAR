@@ -165,6 +165,71 @@ SphereMesh make_sphere(float radius, int stacks, int slices)
     return m;
 }
 
+// ── Paramètres de l'orbite de démo ───────────────────────────────────────────
+// a = 7500 km, e = 0.08 → périastre ≈ 522 km, apoastre ≈ 1722 km d'altitude
+const float R_EARTH_KM  = 6378.137f;
+const float ORB_A_GL    = 7500.0f  / R_EARTH_KM;  // demi-grand axe en unités GL
+const float ORB_E       = 0.08f;
+const float ORB_I       = glm::radians(28.5f);     // inclinaison
+const float ORB_RAAN    = glm::radians(30.0f);     // ascension droite du nœud ascendant
+const float ORB_OMEGA   = glm::radians(60.0f);     // argument du périastre
+const float MARKER_SIZE = 0.05f;                   // taille des triangles en unités GL
+
+// Matrice de rotation PQW → ECI : Rz(−Ω) · Rx(−i) · Rz(−ω)
+static glm::mat3 pqw_to_eci_mat(float raan, float inc, float omega)
+{
+    glm::mat4 R = glm::rotate(glm::mat4(1.0f), -raan,  glm::vec3(0, 0, 1))
+                * glm::rotate(glm::mat4(1.0f), -inc,   glm::vec3(1, 0, 0))
+                * glm::rotate(glm::mat4(1.0f), -omega, glm::vec3(0, 0, 1));
+    return glm::mat3(R);
+}
+
+// Génère N×3 floats pour GL_LINE_LOOP représentant l'ellipse orbitale
+static std::vector<float> make_orbit_polyline(float a, float e,
+                                               float inc, float raan, float omega,
+                                               int steps = 360)
+{
+    glm::mat3 R = pqw_to_eci_mat(raan, inc, omega);
+    float p = a * (1.0f - e * e);  // paramètre orbital (semi-latus rectum)
+    std::vector<float> verts;
+    verts.reserve(steps * 3);
+    for (int k = 0; k < steps; ++k) {
+        float nu  = glm::two_pi<float>() * k / steps;
+        float r   = p / (1.0f + e * std::cos(nu));
+        glm::vec3 eci = R * glm::vec3(r * std::cos(nu), r * std::sin(nu), 0.0f);
+        verts.push_back(eci.x);
+        verts.push_back(eci.y);
+        verts.push_back(eci.z);
+    }
+    return verts;
+}
+
+// Génère 9 floats (3 sommets) pour le triangle marqueur d'une apside.
+// apex_outward = true  → apoastre  ▲ (sommet vers l'extérieur, loin de la Terre)
+// apex_outward = false → périastre ▽ (sommet vers la Terre)
+static std::vector<float> make_apsis_triangle(glm::vec3 pos, glm::vec3 normal,
+                                               bool apex_outward, float size)
+{
+    glm::vec3 radial  = glm::normalize(pos);
+    glm::vec3 tangent = glm::normalize(glm::cross(normal, radial));
+
+    glm::vec3 apex, v1, v2;
+    if (apex_outward) {
+        apex          = pos + radial * size;
+        glm::vec3 base = pos - radial * (size * 0.5f);
+        v1 = base + tangent * (size * 0.866f);
+        v2 = base - tangent * (size * 0.866f);
+    } else {
+        apex          = pos - radial * size;
+        glm::vec3 base = pos + radial * (size * 0.5f);
+        v1 = base + tangent * (size * 0.866f);
+        v2 = base - tangent * (size * 0.866f);
+    }
+    return { apex.x, apex.y, apex.z,
+             v1.x,   v1.y,   v1.z,
+             v2.x,   v2.y,   v2.z };
+}
+
 //Main
 int main()
 {
@@ -236,6 +301,45 @@ int main()
 
     GLsizei indexCount = (GLsizei)sphere.indices.size();
 
+    // ── Orbite ───────────────────────────────────────────────────────────────
+    glm::mat3 R          = pqw_to_eci_mat(ORB_RAAN, ORB_I, ORB_OMEGA);
+    glm::vec3 normalECI  = glm::normalize(R * glm::vec3(0.0f, 0.0f, 1.0f));
+    glm::vec3 posApo     = R * glm::vec3(-ORB_A_GL * (1.0f + ORB_E), 0.0f, 0.0f);
+    glm::vec3 posPeri    = R * glm::vec3( ORB_A_GL * (1.0f - ORB_E), 0.0f, 0.0f);
+
+    // Polyline orbitale
+    auto orbitVerts = make_orbit_polyline(ORB_A_GL, ORB_E, ORB_I, ORB_RAAN, ORB_OMEGA);
+
+    GLuint orbitVAO, orbitVBO;
+    glGenVertexArrays(1, &orbitVAO);
+    glGenBuffers(1, &orbitVBO);
+    glBindVertexArray(orbitVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, orbitVBO);
+    glBufferData(GL_ARRAY_BUFFER, orbitVerts.size() * sizeof(float),
+                 orbitVerts.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+    GLsizei orbitVertCount = (GLsizei)(orbitVerts.size() / 3);
+
+    // Triangles marqueurs (apoastre ▲ puis périastre ▽ dans le même VBO)
+    auto apoTri  = make_apsis_triangle(posApo,  normalECI, true,  MARKER_SIZE);
+    auto periTri = make_apsis_triangle(posPeri, normalECI, false, MARKER_SIZE);
+    std::vector<float> markerVerts;
+    markerVerts.insert(markerVerts.end(), apoTri.begin(),  apoTri.end());
+    markerVerts.insert(markerVerts.end(), periTri.begin(), periTri.end());
+
+    GLuint markerVAO, markerVBO;
+    glGenVertexArrays(1, &markerVAO);
+    glGenBuffers(1, &markerVBO);
+    glBindVertexArray(markerVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, markerVBO);
+    glBufferData(GL_ARRAY_BUFFER, markerVerts.size() * sizeof(float),
+                 markerVerts.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+
     //Uniforms
     GLint locMVP = glGetUniformLocation(shader, "uMVP");
     GLint locColor = glGetUniformLocation(shader, "uColor");
@@ -278,6 +382,21 @@ int main()
         glDrawElements(GL_LINES, indexCount, GL_UNSIGNED_INT, 0);
         glBindVertexArray(0);
 
+        // Orbite (jaune-orangé)
+        glUniform3f(locColor, 1.0f, 0.75f, 0.2f);
+        glBindVertexArray(orbitVAO);
+        glDrawArrays(GL_LINE_LOOP, 0, orbitVertCount);
+
+        // Apoastre ▲ (vert)
+        glUniform3f(locColor, 0.2f, 1.0f, 0.35f);
+        glBindVertexArray(markerVAO);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        // Périastre ▽ (rouge)
+        glUniform3f(locColor, 1.0f, 0.3f, 0.2f);
+        glDrawArrays(GL_TRIANGLES, 3, 3);
+        glBindVertexArray(0);
+
         glfwSwapBuffers(window);
     }
 
@@ -285,6 +404,10 @@ int main()
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
+    glDeleteVertexArrays(1, &orbitVAO);
+    glDeleteBuffers(1, &orbitVBO);
+    glDeleteVertexArrays(1, &markerVAO);
+    glDeleteBuffers(1, &markerVBO);
     glDeleteProgram(shader);
     glfwTerminate();
     return 0;
