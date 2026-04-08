@@ -1,6 +1,7 @@
 # Librairies externes — pas besoin de les versionner
 include/glm/
 libraries/
+.vs/
 
 # Fichiers compilés Visual Studio
 *.exe
