@@ -67,6 +67,7 @@ add_executable(OrbitalSim
 target_include_directories(OrbitalSim PRIVATE
     include
     vendor/glad/include
+    nrlmsise-00
 )
 
 # ─── Links ─────────────────────────────────────────────────────────────────────
