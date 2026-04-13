@@ -8,103 +8,113 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <algorithm>
 
-//Dimensions de la fenêtre
-const int SCR_WIDTH = 900;
-const int SCR_HEIGHT = 700;
+// ─── Dimensions fenêtre ──────────────────────────────────────────────────────
+static int WIN_W = 1400;
+static int WIN_H =  750;
 
-//État caméra (arcball simple)
-float camYaw = 30.0f;   // degrés
-float camPitch = 20.0f;   // degrés
-float camRadius = 3.0f;    // distance au centre
+// ─── Caméra 3D (arcball) ─────────────────────────────────────────────────────
+static float camYaw    =  30.0f;
+static float camPitch  =  20.0f;
+static float camRadius =   3.0f;
 
-bool  mouseDown = false;
-float lastX = 0.0f, lastY = 0.0f;
+// ─── Planisphère ─────────────────────────────────────────────────────────────
+static float mapCtrLon =   0.0f;   // longitude du centre (degrés)
+static float mapCtrLat =   0.0f;   // latitude  du centre (degrés)
+static float mapZoom   =   1.0f;   // facteur de zoom (1 = monde entier en hauteur)
 
-//Callbacks
-void framebuffer_size_callback(GLFWwindow*, int w, int h)
+// ─── Souris ──────────────────────────────────────────────────────────────────
+static bool  lmbDown      = false;
+static float lastMouseX   = 0.0f;
+static float lastMouseY   = 0.0f;
+static bool  dragIn3D     = false;  // true = drag commencé dans le panneau 3D
+
+static bool in3DPanel(double x) { return x < WIN_W * 0.5; }
+
+// ─── Callbacks ───────────────────────────────────────────────────────────────
+static void framebuffer_size_callback(GLFWwindow*, int w, int h)
 {
-    glViewport(0, 0, w, h);
+    WIN_W = w;
+    WIN_H = h;
 }
 
-void mouse_button_callback(GLFWwindow*, int button, int action, int)
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int)
 {
-    if (button == GLFW_MOUSE_BUTTON_LEFT)
-        mouseDown = (action == GLFW_PRESS);
-}
-
-void cursor_pos_callback(GLFWwindow*, double xpos, double ypos)
-{
-    static bool first = true;
-    if (first) { lastX = (float)xpos; lastY = (float)ypos; first = false; }
-
-    if (mouseDown) {
-        float dx = (float)xpos - lastX;
-        float dy = (float)ypos - lastY;
-        camYaw += dx * 0.4f;
-        camPitch = glm::clamp(camPitch + dy * 0.4f, -89.0f, 89.0f);
+    if (button == GLFW_MOUSE_BUTTON_LEFT) {
+        lmbDown = (action == GLFW_PRESS);
+        if (lmbDown) {
+            double cx, cy;
+            glfwGetCursorPos(window, &cx, &cy);
+            dragIn3D = in3DPanel(cx);
+        }
     }
-    lastX = (float)xpos;
-    lastY = (float)ypos;
 }
 
-void scroll_callback(GLFWwindow*, double, double yoffset)
+static void cursor_pos_callback(GLFWwindow*, double xpos, double ypos)
 {
-    camRadius = glm::clamp(camRadius - (float)yoffset * 0.2f, 1.2f, 10.0f);
+    float dx =  (float)xpos - lastMouseX;
+    float dy =  (float)ypos - lastMouseY;
+
+    if (lmbDown) {
+        if (dragIn3D) {
+            // Rotation arcball
+            camYaw   += dx * 0.4f;
+            camPitch  = glm::clamp(camPitch + dy * 0.4f, -89.0f, 89.0f);
+        } else {
+            // Déplacement planisphère
+            int panelH = WIN_H;
+            float pixPerDeg = (panelH / 180.0f) * mapZoom;
+            mapCtrLon -= dx / pixPerDeg;
+            mapCtrLat += dy / pixPerDeg;
+            mapCtrLon  = glm::clamp(mapCtrLon, -180.0f, 180.0f);
+            mapCtrLat  = glm::clamp(mapCtrLat,  -90.0f,  90.0f);
+        }
+    }
+
+    lastMouseX = (float)xpos;
+    lastMouseY = (float)ypos;
 }
 
-void key_callback(GLFWwindow* window, int key, int, int action, int)
+static void scroll_callback(GLFWwindow* window, double, double yoffset)
+{
+    double cx, cy;
+    glfwGetCursorPos(window, &cx, &cy);
+
+    if (in3DPanel(cx)) {
+        camRadius = glm::clamp(camRadius - (float)yoffset * 0.25f, 1.2f, 10.0f);
+    } else {
+        float factor = (yoffset > 0) ? 1.15f : (1.0f / 1.15f);
+        mapZoom = glm::clamp(mapZoom * factor, 0.4f, 25.0f);
+    }
+}
+
+static void key_callback(GLFWwindow* window, int key, int, int action, int)
 {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 }
 
-//Shaders GLSL
-const char* VERT_SRC = R"(
-#version 330 core
-layout(location = 0) in vec3 aPos;
-
-uniform mat4 uMVP;
-
-void main()
-{
-    gl_Position = uMVP * vec4(aPos, 1.0);
-}
-)";
-
-const char* FRAG_SRC = R"(
-#version 330 core
-out vec4 FragColor;
-
-uniform vec3 uColor;
-
-void main()
-{
-    FragColor = vec4(uColor, 1.0);
-}
-)";
-
-//Compilation shader
-GLuint compile_shader(GLenum type, const char* src)
+// ─── Compilation shaders ─────────────────────────────────────────────────────
+static GLuint compile_shader(GLenum type, const char* src)
 {
     GLuint id = glCreateShader(type);
     glShaderSource(id, 1, &src, nullptr);
     glCompileShader(id);
-
     GLint ok;
     glGetShaderiv(id, GL_COMPILE_STATUS, &ok);
     if (!ok) {
         char log[512];
         glGetShaderInfoLog(id, 512, nullptr, log);
-        std::cerr << "Erreur shader : " << log << "\n";
+        std::cerr << "Shader error: " << log << "\n";
     }
     return id;
 }
 
-GLuint create_program(const char* vert, const char* frag)
+static GLuint create_program(const char* vert, const char* frag)
 {
-    GLuint vs = compile_shader(GL_VERTEX_SHADER, vert);
-    GLuint fs = compile_shader(GL_FRAGMENT_SHADER, frag);
+    GLuint vs  = compile_shader(GL_VERTEX_SHADER,   vert);
+    GLuint fs  = compile_shader(GL_FRAGMENT_SHADER, frag);
     GLuint pgm = glCreateProgram();
     glAttachShader(pgm, vs);
     glAttachShader(pgm, fs);
@@ -114,178 +124,395 @@ GLuint create_program(const char* vert, const char* frag)
     return pgm;
 }
 
-//Génération de la sphère
-//
-//Renvoie les indices pour GL_LINES afin d'avoir un vrai wireframe :
-//chaque arête (horizontal + vertical) est explicitement listée.
-//
-struct SphereMesh {
-    std::vector<float>        vertices;  // xyz par sommet
-    std::vector<unsigned int> indices;   // paires pour GL_LINES
+// ─── Shader 3D (Phong simplifié) ─────────────────────────────────────────────
+static const char* VERT3D = R"glsl(
+#version 330 core
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+uniform mat4 uMVP;
+uniform mat4 uModel;
+out vec3 vNormal;
+out vec3 vFragPos;
+void main()
+{
+    vFragPos    = vec3(uModel * vec4(aPos, 1.0));
+    vNormal     = mat3(transpose(inverse(uModel))) * aNormal;
+    gl_Position = uMVP * vec4(aPos, 1.0);
+}
+)glsl";
+
+static const char* FRAG3D = R"glsl(
+#version 330 core
+in  vec3 vNormal;
+in  vec3 vFragPos;
+uniform vec3 uLightDir;
+uniform vec3 uColor;
+out vec4 FragColor;
+void main()
+{
+    vec3 norm    = normalize(vNormal);
+    float diff   = max(dot(norm, normalize(uLightDir)), 0.0);
+    vec3 ambient = 0.20 * uColor;
+    vec3 diffuse = diff  * uColor;
+    // Specular simple
+    vec3 viewDir = normalize(-vFragPos);
+    vec3 reflDir = reflect(-normalize(uLightDir), norm);
+    float spec   = pow(max(dot(viewDir, reflDir), 0.0), 32.0);
+    vec3 specular = 0.15 * vec3(1.0) * spec;
+    FragColor = vec4(ambient + diffuse + specular, 1.0);
+}
+)glsl";
+
+// ─── Shader 2D (planisphère, UI) ─────────────────────────────────────────────
+static const char* VERT2D = R"glsl(
+#version 330 core
+layout(location = 0) in vec2 aPos;
+uniform mat4 uProj;
+void main()
+{
+    gl_Position = uProj * vec4(aPos, 0.0, 1.0);
+}
+)glsl";
+
+static const char* FRAG2D = R"glsl(
+#version 330 core
+uniform vec4 uColor;
+out vec4 FragColor;
+void main()
+{
+    FragColor = uColor;
+}
+)glsl";
+
+// ─── Géométrie sphère (pos + normale) ────────────────────────────────────────
+struct SphereGPU {
+    GLuint vao, vbo, ebo;
+    GLsizei count;
 };
 
-SphereMesh make_sphere(float radius, int stacks, int slices)
+static SphereGPU build_sphere(float r, int stacks, int slices)
 {
-    SphereMesh m;
+    std::vector<float>        verts;
+    std::vector<unsigned int> idx;
 
-    //Sommets
     for (int i = 0; i <= stacks; ++i) {
-        float phi = glm::pi<float>() * i / stacks;        // [0, π]
+        float phi = glm::pi<float>() * i / stacks;
         for (int j = 0; j <= slices; ++j) {
-            float theta = glm::two_pi<float>() * j / slices;  // [0, 2π]
-            float x = radius * std::sin(phi) * std::cos(theta);
-            float y = radius * std::cos(phi);
-            float z = radius * std::sin(phi) * std::sin(theta);
-            m.vertices.push_back(x);
-            m.vertices.push_back(y);
-            m.vertices.push_back(z);
+            float theta = glm::two_pi<float>() * j / slices;
+            float x = std::sin(phi) * std::cos(theta);
+            float y = std::cos(phi);
+            float z = std::sin(phi) * std::sin(theta);
+            verts.push_back(r * x); verts.push_back(r * y); verts.push_back(r * z);  // pos
+            verts.push_back(x);     verts.push_back(y);     verts.push_back(z);       // normal
         }
     }
 
-    //Arêtes horizontales (parallèles)
-    for (int i = 0; i <= stacks; ++i) {
-        for (int j = 0; j < slices; ++j) {
-            unsigned int a = i * (slices + 1) + j;
-            unsigned int b = a + 1;
-            m.indices.push_back(a);
-            m.indices.push_back(b);
-        }
-    }
-
-    //Arêtes verticales (méridiens)
     for (int i = 0; i < stacks; ++i) {
-        for (int j = 0; j <= slices; ++j) {
-            unsigned int a = i * (slices + 1) + j;
-            unsigned int b = (i + 1) * (slices + 1) + j;
-            m.indices.push_back(a);
-            m.indices.push_back(b);
+        for (int j = 0; j < slices; ++j) {
+            unsigned a = i * (slices + 1) + j;
+            unsigned b = a + (slices + 1);
+            idx.push_back(a);   idx.push_back(b);   idx.push_back(a + 1);
+            idx.push_back(a+1); idx.push_back(b);   idx.push_back(b + 1);
         }
     }
 
-    return m;
+    SphereGPU g;
+    g.count = (GLsizei)idx.size();
+    glGenVertexArrays(1, &g.vao);
+    glGenBuffers(1, &g.vbo);
+    glGenBuffers(1, &g.ebo);
+    glBindVertexArray(g.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, g.vbo);
+    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size() * sizeof(unsigned), idx.data(), GL_STATIC_DRAW);
+    // attrib 0 : position
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    // attrib 1 : normale
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+    return g;
 }
 
-//Main
+// ─── Buffer 2D dynamique ─────────────────────────────────────────────────────
+struct DynBuf2D {
+    GLuint vao, vbo;
+};
+
+static DynBuf2D make_dyn_buf2d()
+{
+    DynBuf2D d;
+    glGenVertexArrays(1, &d.vao);
+    glGenBuffers(1, &d.vbo);
+    glBindVertexArray(d.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, d.vbo);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+    return d;
+}
+
+static void draw_2d(DynBuf2D& d, const std::vector<float>& pts,
+                    GLenum mode, GLint locColor, glm::vec4 col)
+{
+    if (pts.empty()) return;
+    glBindBuffer(GL_ARRAY_BUFFER, d.vbo);
+    glBufferData(GL_ARRAY_BUFFER, pts.size() * sizeof(float), pts.data(), GL_DYNAMIC_DRAW);
+    glUniform4fv(locColor, 1, glm::value_ptr(col));
+    glBindVertexArray(d.vao);
+    glDrawArrays(mode, 0, (GLsizei)(pts.size() / 2));
+    glBindVertexArray(0);
+}
+
+// ─── Projection lon/lat → pixels écran ───────────────────────────────────────
+// Le panneau droit occupe [halfW, WIN_W] x [0, WIN_H] en pixels écran (y=0 en haut)
+static glm::vec2 lonlat_to_px(float lon, float lat, int halfW)
+{
+    int panelW = WIN_W - halfW;
+    int panelH = WIN_H;
+
+    float pixPerDeg = (panelH / 180.0f) * mapZoom;
+
+    float sx = panelW * 0.5f + (lon - mapCtrLon) * pixPerDeg;
+    float sy = panelH * 0.5f - (lat - mapCtrLat) * pixPerDeg;   // y vers le bas
+
+    return { halfW + sx, sy };
+}
+
+// ─── Construction du graticule ────────────────────────────────────────────────
+static std::vector<float> build_graticule(int halfW, int lonStep, int latStep)
+{
+    std::vector<float> pts;
+    constexpr int SEG = 8;   // segments par ligne (pour la découpe si reprojection future)
+
+    // Méridiens
+    for (int lon = -180; lon <= 180; lon += lonStep) {
+        for (int s = 0; s < SEG; ++s) {
+            float lat0 = -90.0f + s       * (180.0f / SEG);
+            float lat1 = -90.0f + (s + 1) * (180.0f / SEG);
+            auto p0 = lonlat_to_px((float)lon, lat0, halfW);
+            auto p1 = lonlat_to_px((float)lon, lat1, halfW);
+            pts.push_back(p0.x); pts.push_back(p0.y);
+            pts.push_back(p1.x); pts.push_back(p1.y);
+        }
+    }
+
+    // Parallèles
+    for (int lat = -90; lat <= 90; lat += latStep) {
+        for (int s = 0; s < SEG; ++s) {
+            float lon0 = -180.0f + s       * (360.0f / SEG);
+            float lon1 = -180.0f + (s + 1) * (360.0f / SEG);
+            auto p0 = lonlat_to_px(lon0, (float)lat, halfW);
+            auto p1 = lonlat_to_px(lon1, (float)lat, halfW);
+            pts.push_back(p0.x); pts.push_back(p0.y);
+            pts.push_back(p1.x); pts.push_back(p1.y);
+        }
+    }
+
+    return pts;
+}
+
+// ─── Ligne unique lon/lat → pixels ───────────────────────────────────────────
+static std::vector<float> lonlat_line(float lon0, float lat0,
+                                       float lon1, float lat1, int halfW)
+{
+    auto p0 = lonlat_to_px(lon0, lat0, halfW);
+    auto p1 = lonlat_to_px(lon1, lat1, halfW);
+    return { p0.x, p0.y, p1.x, p1.y };
+}
+
+// ─── Rectangle plein (2 triangles) ───────────────────────────────────────────
+static std::vector<float> make_rect(float x0, float y0, float x1, float y1)
+{
+    return { x0, y0,  x1, y0,  x1, y1,
+             x1, y1,  x0, y1,  x0, y0 };
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────────
 int main()
 {
-    //Init GLFW
-    if (!glfwInit()) {
-        std::cerr << "Échec glfwInit\n";
-        return -1;
-    }
+    if (!glfwInit()) { std::cerr << "glfwInit failed\n"; return -1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_SAMPLES, 4);  // antialiasing
+    glfwWindowHint(GLFW_SAMPLES, 4);
 
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT,
-        "Sphère Filaire", nullptr, nullptr);
-    if (!window) {
-        std::cerr << "Échec glfwCreateWindow\n";
-        glfwTerminate();
-        return -1;
-    }
+    GLFWwindow* window = glfwCreateWindow(WIN_W, WIN_H, "OrbitalSim", nullptr, nullptr);
+    if (!window) { std::cerr << "glfwCreateWindow failed\n"; glfwTerminate(); return -1; }
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(1);  // VSync
 
-    //Init GLAD
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
-        std::cerr << "Échec GLAD\n";
-        return -1;
+        std::cerr << "GLAD failed\n"; return -1;
     }
 
-    //Callbacks
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetMouseButtonCallback(window, mouse_button_callback);
-    glfwSetCursorPosCallback(window, cursor_pos_callback);
-    glfwSetScrollCallback(window, scroll_callback);
-    glfwSetKeyCallback(window, key_callback);
+    glfwSetMouseButtonCallback   (window, mouse_button_callback);
+    glfwSetCursorPosCallback     (window, cursor_pos_callback);
+    glfwSetScrollCallback        (window, scroll_callback);
+    glfwSetKeyCallback           (window, key_callback);
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
+    glEnable(GL_SCISSOR_TEST);
 
-    //Shader
-    GLuint shader = create_program(VERT_SRC, FRAG_SRC);
+    // ── Shaders ─────────────────────────────────────────────────────────────
+    GLuint shader3D = create_program(VERT3D, FRAG3D);
+    GLuint shader2D = create_program(VERT2D, FRAG2D);
 
-    //Géométrie
-    SphereMesh sphere = make_sphere(1.0f, 24, 36);  // rayon 1, 24 stacks, 36 slices
+    GLint loc3D_MVP      = glGetUniformLocation(shader3D, "uMVP");
+    GLint loc3D_Model    = glGetUniformLocation(shader3D, "uModel");
+    GLint loc3D_LightDir = glGetUniformLocation(shader3D, "uLightDir");
+    GLint loc3D_Color    = glGetUniformLocation(shader3D, "uColor");
 
-    GLuint VAO, VBO, EBO;
-    glGenVertexArrays(1, &VAO);
-    glGenBuffers(1, &VBO);
-    glGenBuffers(1, &EBO);
+    GLint loc2D_Proj  = glGetUniformLocation(shader2D, "uProj");
+    GLint loc2D_Color = glGetUniformLocation(shader2D, "uColor");
 
-    glBindVertexArray(VAO);
+    // ── Géométrie ────────────────────────────────────────────────────────────
+    SphereGPU sphere = build_sphere(1.0f, 48, 64);
+    DynBuf2D  dyn    = make_dyn_buf2d();
 
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER,
-        sphere.vertices.size() * sizeof(float),
-        sphere.vertices.data(),
-        GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-        sphere.indices.size() * sizeof(unsigned int),
-        sphere.indices.data(),
-        GL_STATIC_DRAW);
-
-    // Attribut position : location 0, 3 floats
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-    glEnableVertexAttribArray(0);
-
-    glBindVertexArray(0);
-
-    GLsizei indexCount = (GLsizei)sphere.indices.size();
-
-    //Uniforms
-    GLint locMVP = glGetUniformLocation(shader, "uMVP");
-    GLint locColor = glGetUniformLocation(shader, "uColor");
-
-    //Boucle de rendu
+    // ── Boucle de rendu ───────────────────────────────────────────────────────
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
 
-        glClearColor(0.08f, 0.08f, 0.12f, 1.0f);
+        int fbW, fbH;
+        glfwGetFramebufferSize(window, &fbW, &fbH);
+        int halfW = fbW / 2;
+
+        // Clear global
+        glScissor(0, 0, fbW, fbH);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        //Matrice MVP
-        float aspect = (float)SCR_WIDTH / SCR_HEIGHT;
+        // ════════════════════════════════════════════════════════════════════
+        // PANNEAU GAUCHE — vue 3D
+        // ════════════════════════════════════════════════════════════════════
+        glViewport(0, 0, halfW, fbH);
+        glScissor (0, 0, halfW, fbH);
+        glEnable(GL_DEPTH_TEST);
 
-        // Projection perspective
-        glm::mat4 proj = glm::perspective(glm::radians(45.0f), aspect, 0.1f, 100.0f);
+        glClearColor(0.05f, 0.06f, 0.12f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Caméra arcball autour de l'origine
-        float yRad = glm::radians(camYaw);
-        float pRad = glm::radians(camPitch);
-        glm::vec3 camPos = {
-            camRadius * std::cos(pRad) * std::sin(yRad),
-            camRadius * std::sin(pRad),
-            camRadius * std::cos(pRad) * std::cos(yRad)
-        };
-        glm::mat4 view = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        {
+            float yRad = glm::radians(camYaw);
+            float pRad = glm::radians(camPitch);
+            glm::vec3 camPos = {
+                camRadius * std::cos(pRad) * std::sin(yRad),
+                camRadius * std::sin(pRad),
+                camRadius * std::cos(pRad) * std::cos(yRad)
+            };
 
-        // Pas de rotation sur le modèle — la sphère reste centrée
-        glm::mat4 model = glm::mat4(1.0f);
+            float aspect3D = (float)halfW / (float)fbH;
+            glm::mat4 proj3D  = glm::perspective(glm::radians(45.0f), aspect3D, 0.1f, 100.0f);
+            glm::mat4 view3D  = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::mat4 model3D = glm::mat4(1.0f);
+            glm::mat4 mvp3D   = proj3D * view3D * model3D;
 
-        glm::mat4 mvp = proj * view * model;
+            glUseProgram(shader3D);
+            glUniformMatrix4fv(loc3D_MVP,   1, GL_FALSE, glm::value_ptr(mvp3D));
+            glUniformMatrix4fv(loc3D_Model, 1, GL_FALSE, glm::value_ptr(model3D));
+            glUniform3f(loc3D_LightDir, 3.0f, 4.0f, 5.0f);
+            glUniform3f(loc3D_Color,    0.15f, 0.42f, 0.82f);  // bleu Terre
 
-        //Draw
-        glUseProgram(shader);
-        glUniformMatrix4fv(locMVP, 1, GL_FALSE, glm::value_ptr(mvp));
-        glUniform3f(locColor, 0.2f, 0.7f, 1.0f);  // bleu cyan
+            glBindVertexArray(sphere.vao);
+            glDrawElements(GL_TRIANGLES, sphere.count, GL_UNSIGNED_INT, 0);
+            glBindVertexArray(0);
+        }
 
-        glBindVertexArray(VAO);
-        glDrawElements(GL_LINES, indexCount, GL_UNSIGNED_INT, 0);
-        glBindVertexArray(0);
+        // ════════════════════════════════════════════════════════════════════
+        // PANNEAU DROIT — planisphère
+        // ════════════════════════════════════════════════════════════════════
+        glViewport(halfW, 0, fbW - halfW, fbH);
+        glScissor (halfW, 0, fbW - halfW, fbH);
+        glDisable(GL_DEPTH_TEST);
+
+        glClearColor(0.04f, 0.07f, 0.14f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        // Projection orthographique : espace pixel écran entier (x : 0→fbW, y : 0→fbH)
+        glm::mat4 proj2D = glm::ortho(0.0f, (float)fbW, (float)fbH, 0.0f, -1.0f, 1.0f);
+        glUseProgram(shader2D);
+        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D));
+
+        // — Fond océan -------------------------------------------------------
+        {
+            auto bg = make_rect((float)halfW, 0.0f, (float)fbW, (float)fbH);
+            draw_2d(dyn, bg, GL_TRIANGLES, loc2D_Color, { 0.04f, 0.07f, 0.14f, 1.0f });
+        }
+
+        // — Graticule (30°) --------------------------------------------------
+        {
+            auto grid = build_graticule(halfW, 30, 30);
+            draw_2d(dyn, grid, GL_LINES, loc2D_Color, { 0.12f, 0.25f, 0.42f, 1.0f });
+        }
+
+        // — Graticule fin (10°) ----------------------------------------------
+        {
+            auto grid = build_graticule(halfW, 10, 10);
+            draw_2d(dyn, grid, GL_LINES, loc2D_Color, { 0.08f, 0.17f, 0.29f, 1.0f });
+        }
+
+        // — Équateur ---------------------------------------------------------
+        {
+            auto eq = lonlat_line(-180.0f, 0.0f, 180.0f, 0.0f, halfW);
+            draw_2d(dyn, eq, GL_LINES, loc2D_Color, { 0.30f, 0.55f, 0.80f, 1.0f });
+        }
+
+        // — Méridien principal -----------------------------------------------
+        {
+            auto pm = lonlat_line(0.0f, -90.0f, 0.0f, 90.0f, halfW);
+            draw_2d(dyn, pm, GL_LINES, loc2D_Color, { 0.30f, 0.55f, 0.80f, 1.0f });
+        }
+
+        // — Tropiques (23.5°) ------------------------------------------------
+        {
+            auto tc = lonlat_line(-180.0f,  23.5f, 180.0f,  23.5f, halfW);
+            auto cc = lonlat_line(-180.0f, -23.5f, 180.0f, -23.5f, halfW);
+            draw_2d(dyn, tc, GL_LINES, loc2D_Color, { 0.22f, 0.40f, 0.60f, 1.0f });
+            draw_2d(dyn, cc, GL_LINES, loc2D_Color, { 0.22f, 0.40f, 0.60f, 1.0f });
+        }
+
+        // — Cercles polaires (66.5°) -----------------------------------------
+        {
+            auto na = lonlat_line(-180.0f,  66.5f, 180.0f,  66.5f, halfW);
+            auto sa = lonlat_line(-180.0f, -66.5f, 180.0f, -66.5f, halfW);
+            draw_2d(dyn, na, GL_LINES, loc2D_Color, { 0.22f, 0.40f, 0.60f, 1.0f });
+            draw_2d(dyn, sa, GL_LINES, loc2D_Color, { 0.22f, 0.40f, 0.60f, 1.0f });
+        }
+
+        // ════════════════════════════════════════════════════════════════════
+        // SÉPARATEUR
+        // ════════════════════════════════════════════════════════════════════
+        glViewport(0, 0, fbW, fbH);
+        glScissor (0, 0, fbW, fbH);
+        glUseProgram(shader2D);
+        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D));
+
+        {
+            float sx = (float)halfW;
+            std::vector<float> sep = { sx - 1.0f, 0.0f,  sx + 1.0f, 0.0f,
+                                       sx + 1.0f, (float)fbH,
+                                       sx + 1.0f, (float)fbH, sx - 1.0f, (float)fbH,
+                                       sx - 1.0f, 0.0f };
+            draw_2d(dyn, sep, GL_TRIANGLES, loc2D_Color, { 0.55f, 0.75f, 1.0f, 1.0f });
+        }
 
         glfwSwapBuffers(window);
     }
 
-    //Nettoyage
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
-    glDeleteBuffers(1, &EBO);
-    glDeleteProgram(shader);
+    // Nettoyage
+    glDeleteVertexArrays(1, &sphere.vao);
+    glDeleteBuffers(1, &sphere.vbo);
+    glDeleteBuffers(1, &sphere.ebo);
+    glDeleteVertexArrays(1, &dyn.vao);
+    glDeleteBuffers(1, &dyn.vbo);
+    glDeleteProgram(shader3D);
+    glDeleteProgram(shader2D);
     glfwTerminate();
     return 0;
 }
