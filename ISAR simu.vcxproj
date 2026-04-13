@@ -147,8 +147,35 @@
     <ClCompile Include="nrlmsise-00\nrlmsise-00_data.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
+<<<<<<< HEAD
   </ItemGroup>
   <ItemGroup>
+=======
+    <ClCompile Include="src\rendering\affichage.cpp" />
+    <ClCompile Include="src\rendering\camera.cpp" />
+    <ClCompile Include="src\rendering\renderer.cpp" />
+    <ClCompile Include="src\simulation\atmosphere.cpp" />
+    <ClCompile Include="src\simulation\orbit.cpp" />
+    <ClCompile Include="src\simulation\physics.cpp" />
+    <ClCompile Include="src\simulation\vehicle.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\core\constants.h" />
+    <ClInclude Include="include\core\math_utils.h" />
+    <ClInclude Include="include\core\ui.h" />
+    <ClInclude Include="include\dispersions\errors.h" />
+    <ClInclude Include="include\dispersions\landing_zone.h" />
+    <ClInclude Include="include\dispersions\monte_carlo.h" />
+    <ClInclude Include="include\mission\ground_track.h" />
+    <ClInclude Include="include\mission\maneuver.h" />
+    <ClInclude Include="include\rendering\affichage.h" />
+    <ClInclude Include="include\rendering\camera.h" />
+    <ClInclude Include="include\rendering\renderer.h" />
+    <ClInclude Include="include\simulation\atmosphere.h" />
+    <ClInclude Include="include\simulation\orbit.h" />
+    <ClInclude Include="include\simulation\physics.h" />
+    <ClInclude Include="include\simulation\vehicle.h" />
+>>>>>>> claude/determined-ellis
     <ClInclude Include="nrlmsise-00\nrlmsise-00.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
