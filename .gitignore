@@ -14,3 +14,14 @@ x64/
 Debug/
 Release/
 .vs/
+
+x64/
+Debug/
+*.ilk
+*.pdb
+*.idb
+*.obj
+*.tlog
+*.log
+*.exe
+.claude/
