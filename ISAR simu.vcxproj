@@ -154,6 +154,7 @@
     <ClCompile Include="nrlmsise-00\nrlmsise-00_data.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
+    <ClCompile Include="src\rendering\affichage.cpp" />
     <ClCompile Include="src\rendering\camera.cpp" />
     <ClCompile Include="src\rendering\renderer.cpp" />
     <ClCompile Include="src\simulation\atmosphere.cpp" />
@@ -170,6 +171,7 @@
     <ClInclude Include="include\dispersions\monte_carlo.h" />
     <ClInclude Include="include\mission\ground_track.h" />
     <ClInclude Include="include\mission\maneuver.h" />
+    <ClInclude Include="include\rendering\affichage.h" />
     <ClInclude Include="include\rendering\camera.h" />
     <ClInclude Include="include\rendering\renderer.h" />
     <ClInclude Include="include\simulation\atmosphere.h" />
