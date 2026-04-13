@@ -1,55 +1,23 @@
-﻿  Main.cpp
-  math_utils.cpp
-  ui.cpp
-  errors.cpp
-  landing_zone.cpp
-  monte_carlo.cpp
-  ground_track.cpp
-\src\core\math_utils.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\core\math_utils.cpp' : No such file or directory
-  (compiler le fichier source '/src/core/math_utils.cpp')
-  
-\src\core\ui.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\core\ui.cpp' : No such file or directory
-  (compiler le fichier source '/src/core/ui.cpp')
-  
-\src\dispersions\errors.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\dispersions\errors.cpp' : No such file or directory
-  (compiler le fichier source '/src/dispersions/errors.cpp')
-  
-\src\dispersions\landing_zone.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\dispersions\landing_zone.cpp' : No such file or directory
-  (compiler le fichier source '/src/dispersions/landing_zone.cpp')
-  
-\src\dispersions\monte_carlo.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\dispersions\monte_carlo.cpp' : No such file or directory
-  (compiler le fichier source '/src/dispersions/monte_carlo.cpp')
-  
-\src\mission\ground_track.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\mission\ground_track.cpp' : No such file or directory
-  (compiler le fichier source '/src/mission/ground_track.cpp')
-  
-  maneuver.cpp
-\src\mission\maneuver.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\mission\maneuver.cpp' : No such file or directory
-  (compiler le fichier source '/src/mission/maneuver.cpp')
-  
-  affichage.cpp
-  camera.cpp
-\src\rendering\camera.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\rendering\camera.cpp' : No such file or directory
-  (compiler le fichier source '/src/rendering/camera.cpp')
-  
-  renderer.cpp
-\src\rendering\renderer.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\rendering\renderer.cpp' : No such file or directory
-  (compiler le fichier source '/src/rendering/renderer.cpp')
-  
-  atmosphere.cpp
-\src\simulation\atmosphere.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\simulation\atmosphere.cpp' : No such file or directory
-  (compiler le fichier source '/src/simulation/atmosphere.cpp')
-  
-  orbit.cpp
-\src\simulation\orbit.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\simulation\orbit.cpp' : No such file or directory
-  (compiler le fichier source '/src/simulation/orbit.cpp')
-  
-  physics.cpp
-\src\simulation\physics.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\simulation\physics.cpp' : No such file or directory
-  (compiler le fichier source '/src/simulation/physics.cpp')
-  
-  vehicle.cpp
-\src\simulation\vehicle.cpp(1,1): error C1083: Impossible d'ouvrir le fichier source : 'src\simulation\vehicle.cpp' : No such file or directory
-  (compiler le fichier source '/src/simulation/vehicle.cpp')
-  
-  Génération de code en cours...
+﻿  affichage.cpp
+glfw3.lib(init.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(init.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(window.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(window.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(input.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(input.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(context.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(context.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(win32_time.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_time.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(win32_thread.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_thread.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(platform.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(platform.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(monitor.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(monitor.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(vulkan.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(vulkan.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(win32_init.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_init.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(null_init.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(null_init.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(win32_module.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_module.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(win32_monitor.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_monitor.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(win32_window.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_window.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(win32_joystick.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(win32_joystick.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(wgl_context.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(wgl_context.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(egl_context.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(egl_context.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(osmesa_context.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(osmesa_context.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(null_monitor.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(null_monitor.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(null_window.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(null_window.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+glfw3.lib(null_joystick.obj) : warning LNK4099: PDB 'glfw3.pdb' n'a pu être trouvé avec 'glfw3.lib(null_joystick.obj)' ou sur 'C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\glfw3.pdb' ; l'objet sera lié sans informations de débogage
+  ISAR simu.vcxproj -> C:\Users\natha\Documents\Estaca\P2I\ISAR simu\x64\Debug\ISAR simu.exe

@@ -547,13 +547,22 @@ int main()
         glClearColor(0.04f, 0.07f, 0.13f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // Projection orthographique : espace pixel écran entier (0→fbW, 0→fbH)
-        // Cela permet aux coordonnées 2D d'être directement en pixels.
-        glm::mat4 proj2D = glm::ortho(0.0f, static_cast<float>(fbW),
-                                       static_cast<float>(fbH), 0.0f,
-                                       -1.0f, 1.0f);
+        // Projection orthographique pour le PANNEAU planisphère :
+        //   left = splitX, right = fbW  →  NDC x=−1 ↔ bord gauche du panneau
+        //                                   NDC x=+1 ↔ bord droit du panneau
+        //   top  = 0,      bottom = fbH →  y croissant vers le bas (espace écran)
+        //
+        // IMPORTANT : le viewport est [splitX, 0, fbW-splitX, fbH].
+        // Avec ortho(splitX, fbW, ...) : 1 unité NDC en X = (fbW-splitX) px
+        //                                1 unité NDC en Y = fbH px
+        // Et le viewport mappe ces NDC exactement sur le panneau → 1 coord = 1 px
+        // dans les DEUX axes.  L'hexagone sera régulier et le bord gauche aligné.
+        glm::mat4 proj2D_panel = glm::ortho(static_cast<float>(splitX),
+                                             static_cast<float>(fbW),
+                                             static_cast<float>(fbH), 0.0f,
+                                             -1.0f, 1.0f);
         glUseProgram(shader2D);
-        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D));
+        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_panel));
 
         // Fond, graticule, marqueurs (via la classe Planisphere)
         gMap.drawBackground(dyn2, loc2D_Color, splitX, fbW, fbH);
@@ -565,10 +574,14 @@ int main()
         // SÉPARATEUR + POIGNÉE
         // ══════════════════════════════════════════════════════════════════════
         // On repasse au viewport/scissor global pour dessiner la barre centrale.
+        // Le séparateur couvre toute la fenêtre → ortho(0, fbW, ...) ici.
         glViewport(0, 0, fbW, fbH);
         glScissor (0, 0, fbW, fbH);
+        glm::mat4 proj2D_full = glm::ortho(0.0f, static_cast<float>(fbW),
+                                            static_cast<float>(fbH), 0.0f,
+                                            -1.0f, 1.0f);
         glUseProgram(shader2D);
-        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D));
+        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
 
         {
             float sx = static_cast<float>(splitX);
