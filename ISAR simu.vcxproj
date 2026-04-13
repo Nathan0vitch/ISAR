@@ -141,16 +141,19 @@
   <ItemGroup>
     <ClCompile Include="glad.c" />
     <ClCompile Include="Main.cpp" />
+    <ClCompile Include="src\core\math_utils.cpp" />
+    <ClCompile Include="src\core\ui.cpp" />
+    <ClCompile Include="src\dispersions\errors.cpp" />
+    <ClCompile Include="src\dispersions\landing_zone.cpp" />
+    <ClCompile Include="src\dispersions\monte_carlo.cpp" />
+    <ClCompile Include="src\mission\ground_track.cpp" />
+    <ClCompile Include="src\mission\maneuver.cpp" />
     <ClCompile Include="nrlmsise-00\nrlmsise-00.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Include="nrlmsise-00\nrlmsise-00_data.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-<<<<<<< HEAD
-  </ItemGroup>
-  <ItemGroup>
-=======
     <ClCompile Include="src\rendering\affichage.cpp" />
     <ClCompile Include="src\rendering\camera.cpp" />
     <ClCompile Include="src\rendering\renderer.cpp" />
@@ -175,7 +178,6 @@
     <ClInclude Include="include\simulation\orbit.h" />
     <ClInclude Include="include\simulation\physics.h" />
     <ClInclude Include="include\simulation\vehicle.h" />
->>>>>>> claude/determined-ellis
     <ClInclude Include="nrlmsise-00\nrlmsise-00.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
