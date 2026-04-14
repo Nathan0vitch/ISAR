@@ -437,7 +437,12 @@ int main()
 
     // Buffers dynamiques
     DynBuf2D dyn2 = make_dyn2d();  // pour le planisphère (2D)
-    DynBuf3D dyn3 = make_dyn3d();  // pour les éléments 3D non éclairés
+    DynBuf3D dyn3 = make_dyn3d();  // pour les marqueurs WayPoint 3D non éclairés
+
+    // Quadrillage 3D statique (uploadé une seule fois sur GPU)
+    // r = 1.005 : légèrement au-dessus de la sphère pour éviter le z-fighting
+    // 72 segments par arc → arcs lisses (~5° par sous-segment)
+    Graticule3DGPU grat3D = build_graticule3D(1.005f, 72);
 
     // ── Direction du soleil ───────────────────────────────────────────────────
     // Le soleil est une lumière directionnelle (rayons parallèles).
@@ -446,19 +451,37 @@ int main()
     const glm::vec3 sunDir = glm::normalize(glm::vec3(1.6f, 0.8f, 0.7f));
 
     // ── WayPoints ─────────────────────────────────────────────────────────────
-    // Paris : lat=48.85°N, lon=2.35°E
+    // Paris : hexagone or
     gWaypoints.push_back({
-        "Paris",            // nom
-        48.85f, 2.35f,      // lat, lon
-        { 1.0f, 0.85f, 0.2f, 1.0f },  // couleur or
-        8.0f,               // rayon hexagone planisphère (pixels)
-        0.055f              // rayon hexagone sphère 3D (fraction du rayon)
+        "Paris",
+        48.85f, 2.35f,
+        { 1.0f, 0.85f, 0.2f, 1.0f },   // or
+        8.0f, 0.055f,
+        WPShape::Hexagon
     });
-    // Pré-calculer les sommets 3D (ils ne changent pas)
-    // On stocke le résultat à part pour ne pas recalculer chaque frame.
-    std::vector<std::vector<float>> waypointHex3D;
+
+    // Pôle Nord : croix rouge (lat=90°, lon=0° — lon arbitraire aux pôles)
+    gWaypoints.push_back({
+        "Pole Nord",
+        90.0f, 0.0f,
+        { 1.0f, 0.22f, 0.18f, 1.0f },  // rouge
+        10.0f, 0.12f,
+        WPShape::Cross
+    });
+
+    // Pôle Sud : croix bleue
+    gWaypoints.push_back({
+        "Pole Sud",
+        -90.0f, 0.0f,
+        { 0.22f, 0.55f, 1.0f, 1.0f },  // bleu
+        10.0f, 0.12f,
+        WPShape::Cross
+    });
+
+    // Pré-calculer les marqueurs 3D (géométrie fixe, calculée une seule fois)
+    std::vector<std::vector<float>> waypointMesh3D;
     for (const auto& wp : gWaypoints)
-        waypointHex3D.push_back(wp.hexSphere());
+        waypointMesh3D.push_back(wp.markerSphere());
 
     // ── Boucle de rendu ───────────────────────────────────────────────────────
     while (!glfwWindowShouldClose(gWindow))
@@ -523,18 +546,13 @@ int main()
         glUseProgram(shaderFlat3D);
         glUniformMatrix4fv(locF_MVP, 1, GL_FALSE, glm::value_ptr(mvp3D));
 
-        // Pôle Nord : trait rouge sur l'axe Y positif (Y = axe de rotation)
-        // De y=1.0 (surface) à y=1.5 (au-delà de la sphère)
-        draw_3d(dyn3, { 0.0f, 1.0f, 0.0f,   0.0f, 1.5f, 0.0f },
-                GL_LINES, locF_Color, { 1.0f, 0.22f, 0.18f, 1.0f });
+        // Quadrillage 3D : 3 niveaux (fin / principal / surbrillance)
+        // L'équateur et le méridien de Greenwich sont inclus dans la surbrillance.
+        draw_graticule3D(grat3D, locF_Color);
 
-        // Pôle Sud : trait bleu sur l'axe Y négatif
-        draw_3d(dyn3, { 0.0f, -1.0f, 0.0f,  0.0f, -1.5f, 0.0f },
-                GL_LINES, locF_Color, { 0.22f, 0.55f, 1.0f, 1.0f });
-
-        // Hexagones 3D des WayPoints
+        // Marqueurs WayPoint (Paris = hexagone, pôles = croix)
         for (int i = 0; i < static_cast<int>(gWaypoints.size()); ++i)
-            draw_3d(dyn3, waypointHex3D[i], GL_LINE_STRIP,
+            draw_3d(dyn3, waypointMesh3D[i], gWaypoints[i].glMode(),
                     locF_Color, gWaypoints[i].color);
 
         // ══════════════════════════════════════════════════════════════════════
@@ -547,13 +565,22 @@ int main()
         glClearColor(0.04f, 0.07f, 0.13f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // Projection orthographique : espace pixel écran entier (0→fbW, 0→fbH)
-        // Cela permet aux coordonnées 2D d'être directement en pixels.
-        glm::mat4 proj2D = glm::ortho(0.0f, static_cast<float>(fbW),
-                                       static_cast<float>(fbH), 0.0f,
-                                       -1.0f, 1.0f);
+        // Projection orthographique pour le PANNEAU planisphère :
+        //   left = splitX, right = fbW  →  NDC x=−1 ↔ bord gauche du panneau
+        //                                   NDC x=+1 ↔ bord droit du panneau
+        //   top  = 0,      bottom = fbH →  y croissant vers le bas (espace écran)
+        //
+        // IMPORTANT : le viewport est [splitX, 0, fbW-splitX, fbH].
+        // Avec ortho(splitX, fbW, ...) : 1 unité NDC en X = (fbW-splitX) px
+        //                                1 unité NDC en Y = fbH px
+        // Et le viewport mappe ces NDC exactement sur le panneau → 1 coord = 1 px
+        // dans les DEUX axes.  L'hexagone sera régulier et le bord gauche aligné.
+        glm::mat4 proj2D_panel = glm::ortho(static_cast<float>(splitX),
+                                             static_cast<float>(fbW),
+                                             static_cast<float>(fbH), 0.0f,
+                                             -1.0f, 1.0f);
         glUseProgram(shader2D);
-        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D));
+        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_panel));
 
         // Fond, graticule, marqueurs (via la classe Planisphere)
         gMap.drawBackground(dyn2, loc2D_Color, splitX, fbW, fbH);
@@ -565,10 +592,14 @@ int main()
         // SÉPARATEUR + POIGNÉE
         // ══════════════════════════════════════════════════════════════════════
         // On repasse au viewport/scissor global pour dessiner la barre centrale.
+        // Le séparateur couvre toute la fenêtre → ortho(0, fbW, ...) ici.
         glViewport(0, 0, fbW, fbH);
         glScissor (0, 0, fbW, fbH);
+        glm::mat4 proj2D_full = glm::ortho(0.0f, static_cast<float>(fbW),
+                                            static_cast<float>(fbH), 0.0f,
+                                            -1.0f, 1.0f);
         glUseProgram(shader2D);
-        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D));
+        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
 
         {
             float sx = static_cast<float>(splitX);
@@ -593,6 +624,9 @@ int main()
     glDeleteBuffers(1, &sphere.ebo);
     glDeleteVertexArrays(1, &dyn2.vao); glDeleteBuffers(1, &dyn2.vbo);
     glDeleteVertexArrays(1, &dyn3.vao); glDeleteBuffers(1, &dyn3.vbo);
+    glDeleteVertexArrays(1, &grat3D.vaoFine); glDeleteBuffers(1, &grat3D.vboFine);
+    glDeleteVertexArrays(1, &grat3D.vaoMaj);  glDeleteBuffers(1, &grat3D.vboMaj);
+    glDeleteVertexArrays(1, &grat3D.vaoHl);   glDeleteBuffers(1, &grat3D.vboHl);
     glDeleteProgram(shader3D);
     glDeleteProgram(shaderFlat3D);
     glDeleteProgram(shader2D);

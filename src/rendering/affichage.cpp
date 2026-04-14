@@ -18,6 +18,7 @@
 // WayPoint
 // =============================================================================
 
+// ── hexSphere ─────────────────────────────────────────────────────────────────
 std::vector<float> WayPoint::hexSphere() const
 {
     // ── Conversion degrés → radians ──────────────────────────────────────────
@@ -69,6 +70,68 @@ std::vector<float> WayPoint::hexSphere() const
         pts.push_back(v.z);
     }
     return pts;
+}
+
+// ── crossSphere ───────────────────────────────────────────────────────────────
+std::vector<float> WayPoint::crossSphere() const
+{
+    const float la = glm::radians(lat);
+    const float lo = glm::radians(lon);
+
+    // Même convention d'axes que hexSphere()
+    glm::vec3 P = {
+        std::cos(la) * std::cos(lo),
+        std::sin(la),
+        std::cos(la) * std::sin(lo)
+    };
+
+    // Vecteurs locaux (identiques à hexSphere)
+    glm::vec3 east = glm::normalize(glm::vec3(
+        -std::sin(lo),
+         0.0f,
+         std::cos(lo)
+    ));
+    glm::vec3 north = glm::normalize(glm::vec3(
+        -std::sin(la) * std::cos(lo),
+         std::cos(la),
+        -std::sin(la) * std::sin(lo)
+    ));
+
+    // ── Quatre extrémités de la croix ─────────────────────────────────────────
+    // La croix (+) est composée de deux segments dans le plan tangent :
+    //   barre horizontale : P·1.005 ± r·east
+    //   barre verticale   : P·1.005 ± r·north
+    //
+    // Format de retour pour GL_LINES : [p0, p1,  p2, p3]
+    //   segment 1 : p0 → p1  (barre est-ouest)
+    //   segment 2 : p2 → p3  (barre nord-sud)
+    glm::vec3 center = P * 1.005f;
+    const float r = radius3D;
+
+    glm::vec3 p0 = center - r * east;
+    glm::vec3 p1 = center + r * east;
+    glm::vec3 p2 = center - r * north;
+    glm::vec3 p3 = center + r * north;
+
+    return {
+        p0.x, p0.y, p0.z,
+        p1.x, p1.y, p1.z,
+        p2.x, p2.y, p2.z,
+        p3.x, p3.y, p3.z
+    };
+}
+
+// ── markerSphere / glMode ─────────────────────────────────────────────────────
+std::vector<float> WayPoint::markerSphere() const
+{
+    return (shape == WPShape::Cross) ? crossSphere() : hexSphere();
+}
+
+GLenum WayPoint::glMode() const
+{
+    // Hexagone : contour fermé → LINE_STRIP
+    // Croix    : 2 segments indépendants → LINES
+    return (shape == WPShape::Cross) ? GL_LINES : GL_LINE_STRIP;
 }
 
 
@@ -193,17 +256,12 @@ SphereGPU build_sphere(float r, int stacks, int slices)
 
     // ── Génération des indices ────────────────────────────────────────────────
     // Chaque quad (i,j) est découpé en 2 triangles.
-    // Les indices des 4 coins du quad sont :
-    //   a = i*(slices+1)+j       b = a + (slices+1)
-    //   a+1                      b+1
     for (int i = 0; i < stacks; ++i) {
         for (int j = 0; j < slices; ++j) {
             unsigned a = i * (slices + 1) + j;
             unsigned b = a + (slices + 1);
 
-            // Triangle 1 : a → b → a+1
             idx.push_back(a);   idx.push_back(b);   idx.push_back(a + 1);
-            // Triangle 2 : a+1 → b → b+1
             idx.push_back(a + 1); idx.push_back(b); idx.push_back(b + 1);
         }
     }
@@ -218,13 +276,11 @@ SphereGPU build_sphere(float r, int stacks, int slices)
 
     glBindVertexArray(g.vao);
 
-    // Vertices
     glBindBuffer(GL_ARRAY_BUFFER, g.vbo);
     glBufferData(GL_ARRAY_BUFFER,
                  static_cast<GLsizeiptr>(verts.size() * sizeof(float)),
-                 verts.data(), GL_STATIC_DRAW);   // GL_STATIC_DRAW : ne changera jamais
+                 verts.data(), GL_STATIC_DRAW);
 
-    // Indices
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g.ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                  static_cast<GLsizeiptr>(idx.size() * sizeof(unsigned)),
@@ -242,6 +298,147 @@ SphereGPU build_sphere(float r, int stacks, int slices)
 
     glBindVertexArray(0);
     return g;
+}
+
+
+// =============================================================================
+// Graticule3DGPU
+// =============================================================================
+
+// ── Helper interne : uploade un tableau de vec3 dans un VAO/VBO statique ──────
+// GL_STATIC_DRAW : indique au driver que ces données ne changeront jamais.
+static void upload_static3d(GLuint& vao, GLuint& vbo, GLsizei& cnt,
+                             const std::vector<float>& pts)
+{
+    cnt = static_cast<GLsizei>(pts.size() / 3);
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER,
+                 static_cast<GLsizeiptr>(pts.size() * sizeof(float)),
+                 pts.data(), GL_STATIC_DRAW);
+    // Attribut 0 : position vec3
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+}
+
+Graticule3DGPU build_graticule3D(float r, int seg)
+{
+    // seg = nombre de segments par arc (≥ 36 pour paraître lisse).
+    // Chaque arc est stocké comme `seg` paires de sommets (GL_LINES).
+
+    std::vector<float> fine, major, highlight;
+
+    // ── Lambda : ajoute un méridien (arc de lon fixe, lat = −90→+90) ─────────
+    // lon_deg : longitude fixe en degrés entiers
+    auto addMeridian = [&](std::vector<float>& v, int lon_deg)
+    {
+        const float theta = glm::radians(static_cast<float>(lon_deg));
+        for (int i = 0; i < seg; ++i)
+        {
+            // Deux extrémités du i-ème sous-segment
+            float lat0 = -90.0f + 180.0f *  i      / seg;
+            float lat1 = -90.0f + 180.0f * (i + 1) / seg;
+            float phi0 = glm::radians(lat0);
+            float phi1 = glm::radians(lat1);
+
+            // p0
+            v.push_back(r * std::cos(phi0) * std::cos(theta));
+            v.push_back(r * std::sin(phi0));
+            v.push_back(r * std::cos(phi0) * std::sin(theta));
+            // p1
+            v.push_back(r * std::cos(phi1) * std::cos(theta));
+            v.push_back(r * std::sin(phi1));
+            v.push_back(r * std::cos(phi1) * std::sin(theta));
+        }
+    };
+
+    // ── Lambda : ajoute un parallèle (arc de lat fixe, lon = 0→360°) ─────────
+    // lat_deg : latitude fixe en degrés entiers
+    auto addParallel = [&](std::vector<float>& v, int lat_deg)
+    {
+        const float phi = glm::radians(static_cast<float>(lat_deg));
+        const float ry  = r * std::sin(phi);   // hauteur y (fixe sur tout le cercle)
+        const float rr  = r * std::cos(phi);   // rayon du cercle de latitude
+
+        for (int i = 0; i < seg; ++i)
+        {
+            float th0 = glm::two_pi<float>() *  i      / seg;
+            float th1 = glm::two_pi<float>() * (i + 1) / seg;
+
+            // p0
+            v.push_back(rr * std::cos(th0));
+            v.push_back(ry);
+            v.push_back(rr * std::sin(th0));
+            // p1
+            v.push_back(rr * std::cos(th1));
+            v.push_back(ry);
+            v.push_back(rr * std::sin(th1));
+        }
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NIVEAU 1 — Grille fine : méridiens tous les 10°, parallèles tous les 5°
+    // Exclut les multiples de 30° / 15° (dessinés au niveau 2).
+    // ─────────────────────────────────────────────────────────────────────────
+    for (int lo = 0; lo < 360; lo += 10)
+        if (lo % 30 != 0)
+            addMeridian(fine, lo);
+
+    for (int la = -85; la <= 85; la += 5)  // ±90° exclus (pôles = points dégénérés)
+        if (la % 15 != 0)
+            addParallel(fine, la);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NIVEAU 2 — Grille principale : méridiens tous les 30°, parallèles tous les 15°
+    // Exclut Greenwich (lon=0°) et l'équateur (lat=0°) → dessinés au niveau 3.
+    // ─────────────────────────────────────────────────────────────────────────
+    for (int lo = 0; lo < 360; lo += 30)
+        if (lo != 0)
+            addMeridian(major, lo);
+
+    for (int la = -75; la <= 75; la += 15)
+        if (la != 0)
+            addParallel(major, la);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NIVEAU 3 — Surbrillances : méridien de Greenwich (lon=0°) + équateur (lat=0°)
+    // Trait plus épais, couleur plus vive — dessinés en dernier (par-dessus).
+    // ─────────────────────────────────────────────────────────────────────────
+    addMeridian(highlight, 0);  // méridien de Greenwich
+    addParallel(highlight, 0);  // équateur
+
+    // ── Upload sur GPU ────────────────────────────────────────────────────────
+    Graticule3DGPU g;
+    upload_static3d(g.vaoFine, g.vboFine, g.cntFine, fine);
+    upload_static3d(g.vaoMaj,  g.vboMaj,  g.cntMaj,  major);
+    upload_static3d(g.vaoHl,   g.vboHl,   g.cntHl,   highlight);
+    return g;
+}
+
+void draw_graticule3D(const Graticule3DGPU& g, GLint locColor)
+{
+    // ── Niveau fin (couleur sombre, même palette que le planisphère) ──────────
+    glUniform4f(locColor, 0.08f, 0.17f, 0.30f, 1.0f);
+    glBindVertexArray(g.vaoFine);
+    glDrawArrays(GL_LINES, 0, g.cntFine);
+
+    // ── Niveau principal ──────────────────────────────────────────────────────
+    glUniform4f(locColor, 0.18f, 0.36f, 0.58f, 1.0f);
+    glBindVertexArray(g.vaoMaj);
+    glDrawArrays(GL_LINES, 0, g.cntMaj);
+
+    // ── Surbrillances : Greenwich + équateur ──────────────────────────────────
+    // Trait légèrement plus épais pour mieux les distinguer.
+    glLineWidth(2.0f);
+    glUniform4f(locColor, 0.40f, 0.66f, 0.92f, 1.0f);
+    glBindVertexArray(g.vaoHl);
+    glDrawArrays(GL_LINES, 0, g.cntHl);
+    glLineWidth(1.0f);   // reset systématique
+
+    glBindVertexArray(0);
 }
 
 
@@ -312,11 +509,8 @@ glm::vec2 Planisphere::project(float lon, float lat,
 // DÉMONSTRATION :
 //   y_pôleNord = cy − (90 − ctrLat) × ppd
 //   Condition  y_pôleNord ≤ 0 :
-//     cy − (90 − ctrLat) × ppd ≤ 0
-//     (90 − ctrLat) × ppd ≥ cy = winH/2
-//     90 − ctrLat ≥ winH/(2·ppd) = 90/zoom
+//     (90 − ctrLat) × ppd ≥ winH/2
 //     ctrLat ≤ 90 − 90/zoom
-//   Idem pour le pôle Sud par symétrie → ctrLat ≥ −(90 − 90/zoom).
 void Planisphere::clampLat()
 {
     float latMax = std::max(0.0f, 90.0f - 90.0f / zoom);
@@ -339,24 +533,22 @@ void Planisphere::drawBackground(DynBuf2D& buf, GLint locColor,
 //   sans se limiter à [-180°, +180°]. project() calcule les pixels
 //   en coordonnées absolues → le scissor OpenGL découpe le reste.
 //
-//   3 tableaux de segments (GL_LINES = paires de sommets) :
-//     fine     : 10° lon / 5° lat  sauf multiples de 30° / 15°
-//     principal: 30° lon / 15° lat sauf multiples de 360° (=Greenwich)
-//     greenwich: 0°, ±360°, … (méridien le plus épais)
-//
-//   Les méridiens (verticaux) vont du bord bas au bord haut du panneau.
-//   Les parallèles (horizontaux) vont du bord gauche au bord droit.
+//   4 tableaux de segments (GL_LINES = paires de sommets) :
+//     fine      : 10° lon / 5° lat  sauf multiples de 30° / 15°
+//     principal : 30° lon / 15° lat sauf Greenwich + équateur
+//     greenwich : 0°, ±360°, … (méridien le plus épais)
+//     equateur  : lat=0° (parallèle le plus épais)
 void Planisphere::drawGraticule(DynBuf2D& buf, GLint locColor,
                                  int splitX, int winW, int winH) const
 {
     // ── Plage visible (avec marge de 1° pour les bords) ──────────────────────
     const float hvl  = halfVisLon(splitX, winW, winH, 1.0f);
-    const float hvla = halfVisLat(winH) + 0.5f;    // +0.5° pour ne pas couper les traits aux pôles
+    const float hvla = halfVisLat(winH) + 0.5f;    // +0.5° pour ne pas couper aux pôles
 
     const float lonL = ctrLon - hvl;
     const float lonR = ctrLon + hvl;
-    const float latB = ctrLat - hvla;   // bas du panneau  (lat la plus petite visible)
-    const float latT = ctrLat + hvla;   // haut du panneau (lat la plus grande visible)
+    const float latB = ctrLat - hvla;   // bas du panneau
+    const float latT = ctrLat + hvla;   // haut du panneau
 
     // ── Lambdas helpers ───────────────────────────────────────────────────────
     // Ajoute un méridien (segment vertical du bas au haut du panneau)
@@ -379,75 +571,80 @@ void Planisphere::drawGraticule(DynBuf2D& buf, GLint locColor,
 
     // ─────────────────────────────────────────────────────────────────────────
     // NIVEAU 1 — Grille fine : 10° lon, 5° lat
-    // Exclut les multiples de 30° (lon) et 15° (lat) → dessinés au niveau 2.
     // ─────────────────────────────────────────────────────────────────────────
     {
         std::vector<float> pts;
 
-        // Méridiens fins : multiples de 10° dans la plage visible
-        // std::floor/ceil pour inclure les lignes juste hors marge
         int lo0 = static_cast<int>(std::floor(lonL / 10.0)) * 10;
         int lo1 = static_cast<int>(std::ceil (lonR / 10.0)) * 10;
-        for (int lo = lo0; lo <= lo1; lo += 10) {
-            if (lo % 30 != 0)   // skip : sera dessiné au niveau 2
+        for (int lo = lo0; lo <= lo1; lo += 10)
+            if (lo % 30 != 0)
                 addMeridian(pts, static_cast<float>(lo));
-        }
 
-        // Parallèles fins : multiples de 5° dans la plage visible
-        // Les latitudes sont bornées à ±90° (pas de sens au-delà des pôles)
         int la0 = static_cast<int>(std::floor(std::max(latB, -90.0f) / 5.0)) * 5;
         int la1 = static_cast<int>(std::ceil (std::min(latT,  90.0f) / 5.0)) * 5;
-        for (int la = la0; la <= la1; la += 5) {
-            if (la % 15 != 0)   // skip : sera dessiné au niveau 2
+        for (int la = la0; la <= la1; la += 5)
+            if (la % 15 != 0)
                 addParallel(pts, static_cast<float>(la));
-        }
 
         glLineWidth(1.0f);
         draw_2d(buf, pts, GL_LINES, locColor, { 0.08f, 0.17f, 0.30f, 1.0f });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // NIVEAU 2 — Grille principale : 30° lon, 15° lat  (surbrillance)
-    // Exclut le méridien de Greenwich (lon = k × 360°) → dessiné au niveau 3.
+    // NIVEAU 2 — Grille principale : 30° lon, 15° lat
+    // Exclut Greenwich (lon % 360 == 0) ET l'équateur (la == 0).
     // ─────────────────────────────────────────────────────────────────────────
     {
         std::vector<float> pts;
 
-        // Méridiens principaux : multiples de 30°, sauf multiples de 360°
         int lo0 = static_cast<int>(std::floor(lonL / 30.0)) * 30;
         int lo1 = static_cast<int>(std::ceil (lonR / 30.0)) * 30;
-        for (int lo = lo0; lo <= lo1; lo += 30) {
-            if (lo % 360 != 0)  // skip Greenwich et ses copies ±360°
+        for (int lo = lo0; lo <= lo1; lo += 30)
+            if (lo % 360 != 0)
                 addMeridian(pts, static_cast<float>(lo));
-        }
 
-        // Parallèles principaux : multiples de 15°
         int la0 = static_cast<int>(std::floor(std::max(latB, -90.0f) / 15.0)) * 15;
         int la1 = static_cast<int>(std::ceil (std::min(latT,  90.0f) / 15.0)) * 15;
         for (int la = la0; la <= la1; la += 15)
-            addParallel(pts, static_cast<float>(la));
+            if (la != 0)   // équateur dessiné au niveau 4
+                addParallel(pts, static_cast<float>(la));
 
-        // Même épaisseur de trait, couleur plus lumineuse pour la distinction
         glLineWidth(1.0f);
         draw_2d(buf, pts, GL_LINES, locColor, { 0.18f, 0.36f, 0.58f, 1.0f });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // NIVEAU 3 — Méridien de Greenwich : lon = 0°, ±360°, ±720°, …
-    // Trait le plus épais, dessiné en dernier (donc au-dessus des autres).
-    // Gestion du loop : on cherche tous les multiples de 360° dans la plage.
+    // NIVEAU 3 — Méridien de Greenwich : lon = 0°, ±360°, …
+    // Trait le plus épais, dessiné en dernier (au-dessus des autres).
     // ─────────────────────────────────────────────────────────────────────────
     {
         std::vector<float> pts;
-
         int lo0 = static_cast<int>(std::floor(lonL / 360.0)) * 360;
         int lo1 = static_cast<int>(std::ceil (lonR / 360.0)) * 360;
         for (int lo = lo0; lo <= lo1; lo += 360)
             addMeridian(pts, static_cast<float>(lo));
 
-        glLineWidth(2.0f);  // glLineWidth > 1.0 est supporté sur la plupart des drivers
+        glLineWidth(2.0f);
         draw_2d(buf, pts, GL_LINES, locColor, { 0.40f, 0.66f, 0.92f, 1.0f });
-        glLineWidth(1.0f);  // reset systématique pour ne pas affecter le prochain draw
+        glLineWidth(1.0f);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // NIVEAU 4 — Équateur : lat = 0°
+    // Même couleur et épaisseur que Greenwich — dessiné par-dessus le reste.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+        std::vector<float> pts;
+        // L'équateur est un seul parallèle, mais on vérifie qu'il est visible.
+        if (latB <= 0.0f && latT >= 0.0f)
+            addParallel(pts, 0.0f);
+
+        if (!pts.empty()) {
+            glLineWidth(2.0f);
+            draw_2d(buf, pts, GL_LINES, locColor, { 0.40f, 0.66f, 0.92f, 1.0f });
+            glLineWidth(1.0f);
+        }
     }
 }
 
@@ -455,19 +652,15 @@ void Planisphere::drawGraticule(DynBuf2D& buf, GLint locColor,
 //
 // LOOP : dessine 3 copies horizontales du marqueur (n = -1, 0, +1),
 //   soit aux longitudes  lon − 360°, lon, lon + 360°.
-//   Les copies hors de la plage visible sont ignorées.
-//   Le scissor OpenGL gère de toute façon le clipping.
+//   Le scissor OpenGL gère le clipping des copies hors panneau.
 //
-// PROPORTIONS :
-//   Le rayon wp.radius2D est en pixels écran.
-//   La projection ortho utilisée en 2D mappe 1 unité = 1 pixel dans les
-//   deux directions. L'hexagone calculé avec cos/sin en pixels est donc
-//   régulier quel que soit le ratio ou le zoom du panneau.
+// FORME :
+//   WPShape::Hexagon → hexagone régulier en GL_LINE_STRIP (7 sommets)
+//   WPShape::Cross   → croix (+)         en GL_LINES      (4 sommets, 2 segments)
 void Planisphere::drawWaypoint(DynBuf2D& buf, GLint locColor,
                                 int splitX, int winW, int winH,
                                 const WayPoint& wp) const
 {
-    // Marge : rayon du marqueur converti en degrés (pour test de visibilité)
     const float margeDegs = wp.radius2D / pixPerDeg(winH) + 2.0f;
     const float hvl = halfVisLon(splitX, winW, winH, margeDegs);
 
@@ -475,24 +668,34 @@ void Planisphere::drawWaypoint(DynBuf2D& buf, GLint locColor,
     {
         float lon = wp.lon + n * 360.0f;
 
-        // Test de visibilité : si le centre est hors plage, on skip
         if (lon < ctrLon - hvl || lon > ctrLon + hvl) continue;
 
-        // Centre du marqueur en pixels écran
         glm::vec2 c = project(lon, wp.lat, splitX, winW, winH);
-
-        // Construction de l'hexagone en pixels :
-        //   angle_i = i × 60°   (hexagone régulier si unités x = unités y)
-        //   sommet_i = centre + r × (cos(angle_i), sin(angle_i))
         const float r = wp.radius2D;
-        std::vector<float> hex;
-        hex.reserve(14);    // 7 points × 2 coordonnées
-        for (int i = 0; i <= 6; ++i) {
-            float a = i * glm::pi<float>() / 3.0f;
-            hex.push_back(c.x + r * std::cos(a));
-            hex.push_back(c.y + r * std::sin(a));
+
+        if (wp.shape == WPShape::Hexagon)
+        {
+            // ── Hexagone régulier ─────────────────────────────────────────────
+            // angle_i = i × 60°, 7 sommets pour GL_LINE_STRIP (contour fermé)
+            std::vector<float> hex;
+            hex.reserve(14);
+            for (int i = 0; i <= 6; ++i) {
+                float a = i * glm::pi<float>() / 3.0f;
+                hex.push_back(c.x + r * std::cos(a));
+                hex.push_back(c.y + r * std::sin(a));
+            }
+            draw_2d(buf, hex, GL_LINE_STRIP, locColor, wp.color);
         }
-        // GL_LINE_STRIP relie les 7 points dans l'ordre → hexagone fermé
-        draw_2d(buf, hex, GL_LINE_STRIP, locColor, wp.color);
+        else // WPShape::Cross
+        {
+            // ── Croix (+) ─────────────────────────────────────────────────────
+            // 2 segments : barre horizontale + barre verticale.
+            // GL_LINES = paires de sommets indépendantes.
+            std::vector<float> cross = {
+                c.x - r, c.y,      c.x + r, c.y,    // barre est-ouest
+                c.x,     c.y - r,  c.x,     c.y + r  // barre nord-sud
+            };
+            draw_2d(buf, cross, GL_LINES, locColor, wp.color);
+        }
     }
 }
