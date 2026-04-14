@@ -3,9 +3,11 @@
 // affichage.h — Structures et classes de rendu, OrbitalSim
 //
 // Ce fichier regroupe tout ce qui concerne l'AFFICHAGE :
-//   • WayPoint    : repère géographique (ville, site d'atterrissage, etc.)
+//   • WPShape     : forme du marqueur d'un WayPoint (hexagone ou croix)
+//   • WayPoint    : repère géographique (ville, pôle, site d'atterrissage, etc.)
 //   • DynBuf2D/3D : wrappers minces autour des buffers GPU dynamiques
 //   • SphereGPU   : sphère UV uploadée sur GPU (positions + normales)
+//   • Graticule3DGPU : quadrillage 3D statique (3 niveaux + surbrillances)
 //   • Planisphere : état + rendu de la vue carte 2D (panneau droit)
 //   • make_rect() : helper géométrique
 //
@@ -22,27 +24,39 @@
 
 
 // =============================================================================
+// WPShape — Forme du marqueur d'un WayPoint
+// =============================================================================
+//
+// Hexagon : hexagone régulier dessiné en GL_LINE_STRIP (7 sommets, contour fermé)
+// Cross   : croix (+) dessinée en GL_LINES (2 segments, 4 sommets)
+//           → utilisée pour les pôles géographiques
+enum class WPShape { Hexagon, Cross };
+
+
+// =============================================================================
 // WayPoint — Repère géographique affiché sur le planisphère ET sur la sphère 3D
 // =============================================================================
 //
 // Un WayPoint est un point nommé à la surface de la Terre.
-// Sur le planisphère, il s'affiche comme un hexagone centré sur ses coordonnées.
-// Sur la sphère 3D, il s'affiche comme un hexagone tangent à la surface.
+// Sur le planisphère, il s'affiche comme un hexagone ou une croix centré sur
+// ses coordonnées.
+// Sur la sphère 3D, il s'affiche dans le plan tangent à la surface.
 //
 // Usage :
 //   WayPoint paris { "Paris", 48.85f, 2.35f, {1.f, 0.85f, 0.2f, 1.f} };
-//   gMap.drawWaypoint(dyn2, locColor, splitX, w, h, paris);
-//   draw_3d(dyn3, paris.hexSphere(), GL_LINE_STRIP, locColor, paris.color);
+//   WayPoint nord  { "Nord",  90.0f,  0.0f,  {1.f, 0.2f,  0.2f, 1.f},
+//                    12.0f, 0.12f, WPShape::Cross };
 struct WayPoint
 {
     std::string name;           // Nom du lieu (usage futur : tooltip, liste)
     float       lat;            // Latitude  en degrés géographiques  (N > 0)
     float       lon;            // Longitude en degrés géographiques  (E > 0)
     glm::vec4   color;          // Couleur RGBA  [0, 1]
-    float       radius2D = 8.0f;    // Rayon de l'hexagone sur le planisphère, en PIXELS ÉCRAN
+    float       radius2D = 8.0f;    // Rayon du marqueur sur le planisphère, en PIXELS ÉCRAN
                                     // → indépendant du zoom et de la taille du panneau
-    float       radius3D = 0.055f;  // Rayon de l'hexagone sur la sphère 3D
-                                    // (fraction du rayon de la sphère, ≈ 5.5 %)
+    float       radius3D = 0.055f;  // Rayon du marqueur sur la sphère 3D
+                                    // (fraction du rayon de la sphère)
+    WPShape     shape    = WPShape::Hexagon;  // Forme du marqueur
 
     // -------------------------------------------------------------------------
     // hexSphere() — Génère les 7 sommets (x,y,z) de l'hexagone 3D.
@@ -56,6 +70,27 @@ struct WayPoint
     // Ils sont légèrement décalés au-dessus de la surface (× 1.005) pour
     // éviter le z-fighting avec la sphère.
     std::vector<float> hexSphere() const;
+
+    // -------------------------------------------------------------------------
+    // crossSphere() — Génère les 4 sommets (x,y,z) de la croix 3D.
+    //
+    // La croix (+) est composée de 2 segments dans le plan tangent :
+    //   barre horizontale : centre − r·east  →  centre + r·east
+    //   barre verticale   : centre − r·north →  centre + r·north
+    //
+    // Retournés dans l'ordre pour GL_LINES (4 sommets = 2 paires).
+    // Légèrement décalés au-dessus de la surface (× 1.005) comme pour l'hexagone.
+    std::vector<float> crossSphere() const;
+
+    // -------------------------------------------------------------------------
+    // markerSphere() — Dispatche vers hexSphere() ou crossSphere() selon `shape`.
+    //
+    // À utiliser dans la boucle de rendu pour éviter le branchement explicite.
+    std::vector<float> markerSphere() const;
+
+    // -------------------------------------------------------------------------
+    // glMode() — Mode OpenGL correspondant à la forme (GL_LINE_STRIP ou GL_LINES).
+    GLenum glMode() const;
 };
 
 
@@ -84,7 +119,7 @@ void draw_2d(DynBuf2D& d, const std::vector<float>& pts,
 // DynBuf3D — Buffer GPU pour des sommets 3D (vec3), rechargé chaque frame
 // =============================================================================
 //
-// Utilisé pour les traits des pôles et l'hexagone de Paris sur la sphère.
+// Utilisé pour les éléments 3D dynamiques (marqueurs de WayPoints).
 struct DynBuf3D { GLuint vao = 0, vbo = 0; };
 
 DynBuf3D make_dyn3d();
@@ -114,6 +149,39 @@ struct SphereGPU { GLuint vao = 0, vbo = 0, ebo = 0; GLsizei count = 0; };
 // stacks : subdivisions en latitude  (suggestion : 48)
 // slices : subdivisions en longitude (suggestion : 64)
 SphereGPU build_sphere(float r, int stacks, int slices);
+
+
+// =============================================================================
+// Graticule3DGPU — Quadrillage 3D statique (géométrie uploadée une seule fois)
+// =============================================================================
+//
+// Le quadrillage reprend exactement les 3 niveaux du planisphère + équateur :
+//   fine      : méridiens tous les 10° (sauf mult. 30°), parallèles tous les 5°
+//               (sauf mult. 15°)  — couleur sombre
+//   major     : méridiens tous les 30° (sauf Greenwich), parallèles tous les 15°
+//               (sauf équateur)   — couleur moyenne
+//   highlight : méridien de Greenwich (lon=0°) + équateur (lat=0°)
+//               — trait épais, couleur vive
+//
+// Les lignes sont stockées en GL_LINES (paires de sommets) dans des VBOs
+// séparés, uploadés avec GL_STATIC_DRAW (géométrie fixe).
+//
+// Chaque arc est découpé en `seg` segments pour paraître lisse.
+struct Graticule3DGPU
+{
+    GLuint vaoFine = 0, vboFine = 0;   GLsizei cntFine = 0;
+    GLuint vaoMaj  = 0, vboMaj  = 0;   GLsizei cntMaj  = 0;
+    GLuint vaoHl   = 0, vboHl   = 0;   GLsizei cntHl   = 0;
+};
+
+// Génère et uploade le quadrillage 3D.
+// r   : rayon des lignes (légèrement > rayon de la sphère pour éviter le z-fighting)
+// seg : subdivisions par arc (suggestion : 72)
+Graticule3DGPU build_graticule3D(float r, int seg);
+
+// Dessine le quadrillage avec le shader Flat3D actif (uMVP doit déjà être envoyé).
+// locColor : location de l'uniforme vec4 uColor dans le shader actif
+void draw_graticule3D(const Graticule3DGPU& g, GLint locColor);
 
 
 // =============================================================================
@@ -201,10 +269,12 @@ public:
     void drawBackground(DynBuf2D&, GLint locColor,
                         int splitX, int winW, int winH) const;
 
-    // Graticule en 3 niveaux :
+    // Graticule en 4 niveaux :
     //   1. Fin      : toutes les 10° lon / 5° lat  — lignes fines, couleur sombre
     //   2. Principal: toutes les 30° lon / 15° lat — lignes moyennes, couleur claire
+    //               (sauf méridien 0° et équateur, dessinés en niveaux 3/4)
     //   3. Greenwich: méridien 0°+copies (±360°…)  — trait épais, couleur vive
+    //   4. Équateur : parallèle 0°                 — trait épais, couleur vive
     //
     // Les méridiens s'étendent sur TOUTE la hauteur du panneau.
     // Les parallèles s'étendent sur TOUTE la largeur du panneau.
@@ -213,12 +283,14 @@ public:
     void drawGraticule(DynBuf2D&, GLint locColor,
                        int splitX, int winW, int winH) const;
 
-    // Hexagone d'un WayPoint avec loop (3 copies horizontales).
+    // Marqueur d'un WayPoint avec loop (3 copies horizontales).
+    //   • Hexagone pour WPShape::Hexagon
+    //   • Croix (+) pour WPShape::Cross
     //
     // PROPORTIONS CONSTANTES :
     //   wp.radius2D est en pixels écran.
     //   La projection ortho (1 unité = 1 pixel en x et en y) garantit
-    //   que l'hexagone reste régulier quel que soit le zoom ou la
+    //   que le marqueur reste régulier quel que soit le zoom ou la
     //   taille du panneau.
     void drawWaypoint(DynBuf2D&, GLint locColor,
                       int splitX, int winW, int winH,
