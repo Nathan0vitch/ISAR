@@ -21,6 +21,7 @@
 
 // Toutes les structures de rendu (WayPoint, Planisphere, DynBuf*, SphereGPU…)
 #include "rendering/affichage.h"
+#include "rendering/menu.h"
 
 #include <iostream>
 #include <vector>
@@ -40,6 +41,16 @@ static int WIN_W = 1400, WIN_H = 750;
 // Par défaut à 0.5 → moitié/moitié.
 static float splitFrac = 0.5f;
 
+// ── Split vertical du panneau droit (menu / planisphère) ─────────────────────
+// mapTopFrac ∈ [0, 0.85] : fraction de WIN_H à partir du haut où commence
+// le planisphère dans le panneau droit.
+// 0.0 → planisphère plein, menu entièrement caché derrière.
+// Augmenter → on révèle le menu au-dessus du planisphère.
+static float mapTopFrac = 0.0f;
+
+// ── Instance du menu ──────────────────────────────────────────────────────────
+static Menu gMenu;
+
 // ── Caméra 3D (arcball) ───────────────────────────────────────────────────────
 // L'arcball place la caméra sur une sphère centrée sur l'origine.
 // camYaw  : rotation autour de l'axe Y (gauche/droite)
@@ -57,25 +68,30 @@ static Planisphere gMap;
 static std::vector<WayPoint> gWaypoints;
 
 // ── Souris ────────────────────────────────────────────────────────────────────
-static bool  lmbDown   = false;
-static float lastMX    = 0.0f, lastMY = 0.0f;
-static bool  dragIn3D  = false;  // true → le drag courant a commencé dans le panneau 3D
-static bool  dragSplit = false;  // true → le drag courant déplace le séparateur
+static bool  lmbDown    = false;
+static float lastMX     = 0.0f, lastMY = 0.0f;
+static bool  dragIn3D   = false;  // true → le drag courant a commencé dans le panneau 3D
+static bool  dragSplit  = false;  // true → le drag courant déplace le séparateur vertical
+static bool  dragMapTop = false;  // true → le drag courant déplace le séparateur horizontal
 
 // ── GLFW ──────────────────────────────────────────────────────────────────────
-static GLFWwindow* gWindow    = nullptr;
-static GLFWcursor* gCurResize = nullptr;   // curseur ↔ (redimensionnement)
-static GLFWcursor* gCurArrow  = nullptr;   // curseur flèche normal
+static GLFWwindow* gWindow     = nullptr;
+static GLFWcursor* gCurResize  = nullptr;   // curseur ↔ (séparateur vertical)
+static GLFWcursor* gCurVResize = nullptr;   // curseur ↕ (séparateur horizontal)
+static GLFWcursor* gCurArrow   = nullptr;   // curseur flèche normal
 
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
-// Position du séparateur en pixels (calculée depuis la fraction)
+// Position du séparateur vertical en pixels (calculée depuis la fraction)
 static float splitX_px() { return splitFrac * static_cast<float>(WIN_W); }
 
-// Retourne true si le curseur (x) est à moins de 6 px du séparateur
+// Position du séparateur horizontal (haut du planisphère) en pixels
+static float mapTopY_px() { return mapTopFrac * static_cast<float>(WIN_H); }
+
+// Retourne true si le curseur (x) est à moins de 6 px du séparateur vertical
 static bool nearSplit(double x) {
     return std::abs(static_cast<float>(x) - splitX_px()) < 6.0f;
 }
@@ -83,6 +99,13 @@ static bool nearSplit(double x) {
 // Retourne true si le curseur est dans le panneau planisphère (droite)
 static bool inMapPanel(double x) {
     return static_cast<float>(x) > splitX_px();
+}
+
+// Retourne true si le curseur est sur le séparateur horizontal du planisphère
+// (dans le panneau droit, à moins de 6 px du bord supérieur du planisphère)
+static bool nearMapTopSplit(double x, double y) {
+    if (!inMapPanel(x)) return false;
+    return std::abs(static_cast<float>(y) - mapTopY_px()) < 6.0f;
 }
 
 
@@ -112,20 +135,29 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
         lmbDown = true;
 
         if (nearSplit(cx)) {
-            // ── Drag du séparateur ──────────────────────────────────────────
-            dragSplit = true;
-            dragIn3D  = false;
-            glfwSetCursor(window, gCurResize);  // curseur ↔ pendant le drag
+            // ── Drag du séparateur vertical (3D / planisphère) ─────────────
+            dragSplit  = true;
+            dragMapTop = false;
+            dragIn3D   = false;
+            glfwSetCursor(window, gCurResize);
+        } else if (nearMapTopSplit(cx, cy)) {
+            // ── Drag du séparateur horizontal (menu / planisphère) ──────────
+            dragMapTop = true;
+            dragSplit  = false;
+            dragIn3D   = false;
+            glfwSetCursor(window, gCurVResize);
         } else {
             // ── Drag dans l'un des deux panneaux ───────────────────────────
-            dragSplit = false;
-            dragIn3D  = !inMapPanel(cx);   // true si panneau 3D (gauche)
+            dragSplit  = false;
+            dragMapTop = false;
+            dragIn3D   = !inMapPanel(cx);   // true si panneau 3D (gauche)
         }
     }
     else
     {
-        lmbDown   = false;
-        dragSplit = false;
+        lmbDown    = false;
+        dragSplit  = false;
+        dragMapTop = false;
         // Le curseur sera remis à jour au prochain mousemove
     }
 }
@@ -138,8 +170,14 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos)
 
     if (dragSplit)
     {
-        // ── Déplace le séparateur ─────────────────────────────────────────
+        // ── Déplace le séparateur vertical ────────────────────────────────
         splitFrac = glm::clamp(static_cast<float>(xpos) / WIN_W, 0.15f, 0.85f);
+    }
+    else if (dragMapTop)
+    {
+        // ── Déplace le séparateur horizontal (haut du planisphère) ───────
+        // 0 = planisphère en haut (menu caché), 0.85 = planisphère tout en bas.
+        mapTopFrac = glm::clamp(static_cast<float>(ypos) / WIN_H, 0.0f, 0.85f);
     }
     else if (lmbDown)
     {
@@ -174,6 +212,8 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos)
         // ── Mise à jour du curseur selon la position ───────────────────────
         if (nearSplit(xpos))
             glfwSetCursor(window, gCurResize);
+        else if (nearMapTopSplit(xpos, ypos))
+            glfwSetCursor(window, gCurVResize);
         else
             glfwSetCursor(window, gCurArrow);
     }
@@ -391,8 +431,9 @@ int main()
     glfwSwapInterval(1);   // VSync : limite le rendu à la fréquence de l'écran
 
     // Curseurs personnalisés
-    gCurResize = glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR);
-    gCurArrow  = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
+    gCurResize  = glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR);   // ↔ séparateur vertical
+    gCurVResize = glfwCreateStandardCursor(GLFW_VRESIZE_CURSOR);   // ↕ séparateur horizontal
+    gCurArrow   = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
 
     // ── Initialisation GLAD (charge les pointeurs de fonctions OpenGL) ────────
     if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
@@ -492,6 +533,12 @@ int main()
         int fbW, fbH;
         glfwGetFramebufferSize(gWindow, &fbW, &fbH);
 
+        // Position du séparateur horizontal (haut du planisphère) en pixels entiers
+        int mapTopY = static_cast<int>(mapTopFrac * fbH);
+
+        // Synchronise le panelTop du planisphère pour les calculs de projection
+        gMap.panelTop = mapTopY;
+
         // Position du séparateur en pixels entiers
         int splitX = static_cast<int>(splitFrac * fbW);
 
@@ -555,63 +602,99 @@ int main()
             draw_3d(dyn3, waypointMesh3D[i], gWaypoints[i].glMode(),
                     locF_Color, gWaypoints[i].color);
 
-        // ══════════════════════════════════════════════════════════════════════
-        // PANNEAU DROIT — Planisphère
-        // ══════════════════════════════════════════════════════════════════════
-        glViewport(splitX, 0, fbW - splitX, fbH);
-        glScissor (splitX, 0, fbW - splitX, fbH);
-        glDisable(GL_DEPTH_TEST);   // le planisphère est 2D, pas besoin de profondeur
-
-        glClearColor(0.04f, 0.07f, 0.13f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        // Projection orthographique pour le PANNEAU planisphère :
-        //   left = splitX, right = fbW  →  NDC x=−1 ↔ bord gauche du panneau
-        //                                   NDC x=+1 ↔ bord droit du panneau
-        //   top  = 0,      bottom = fbH →  y croissant vers le bas (espace écran)
-        //
-        // IMPORTANT : le viewport est [splitX, 0, fbW-splitX, fbH].
-        // Avec ortho(splitX, fbW, ...) : 1 unité NDC en X = (fbW-splitX) px
-        //                                1 unité NDC en Y = fbH px
-        // Et le viewport mappe ces NDC exactement sur le panneau → 1 coord = 1 px
-        // dans les DEUX axes.  L'hexagone sera régulier et le bord gauche aligné.
-        glm::mat4 proj2D_panel = glm::ortho(static_cast<float>(splitX),
-                                             static_cast<float>(fbW),
-                                             static_cast<float>(fbH), 0.0f,
-                                             -1.0f, 1.0f);
-        glUseProgram(shader2D);
-        glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_panel));
-
-        // Fond, graticule, marqueurs (via la classe Planisphere)
-        gMap.drawBackground(dyn2, loc2D_Color, splitX, fbW, fbH);
-        gMap.drawGraticule (dyn2, loc2D_Color, splitX, fbW, fbH);
-        for (const auto& wp : gWaypoints)
-            gMap.drawWaypoint(dyn2, loc2D_Color, splitX, fbW, fbH, wp);
-
-        // ══════════════════════════════════════════════════════════════════════
-        // SÉPARATEUR + POIGNÉE
-        // ══════════════════════════════════════════════════════════════════════
-        // On repasse au viewport/scissor global pour dessiner la barre centrale.
-        // Le séparateur couvre toute la fenêtre → ortho(0, fbW, ...) ici.
-        glViewport(0, 0, fbW, fbH);
-        glScissor (0, 0, fbW, fbH);
+        // ── Projection ortho pleine fenêtre (partagée par menu et séparateurs) ──
+        // Coordonnées écran : x ∈ [0, fbW], y ∈ [0, fbH] (y=0 en haut)
         glm::mat4 proj2D_full = glm::ortho(0.0f, static_cast<float>(fbW),
                                             static_cast<float>(fbH), 0.0f,
                                             -1.0f, 1.0f);
+
+        glDisable(GL_DEPTH_TEST);   // tout le reste est 2D
+
+        // ══════════════════════════════════════════════════════════════════════
+        // MENU — Zone en haut à droite, au-dessus du planisphère
+        // ══════════════════════════════════════════════════════════════════════
+        // Rendu en premier (en arrière-plan) : le planisphère le recouvrira
+        // si mapTopY < Menu::HEIGHT.
+        // Scissor OpenGL (y depuis le bas du framebuffer) :
+        //   zone menu en écran = [mapTopY .. 0] depuis le haut
+        //            en OpenGL = [fbH - mapTopY .. fbH]
+        if (mapTopY > 0)
+        {
+            glViewport(0, 0, fbW, fbH);
+            glScissor(splitX, fbH - mapTopY, fbW - splitX, mapTopY);
+            glUseProgram(shader2D);
+            glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
+            gMenu.draw(dyn2, loc2D_Color, splitX, fbW, fbH, mapTopY);
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // PANNEAU DROIT — Planisphère
+        // ══════════════════════════════════════════════════════════════════════
+        // Le panneau planisphère occupe la zone [splitX, mapTopY] → [fbW, fbH]
+        // en coordonnées écran (y depuis le haut).
+        // En OpenGL (y depuis le bas) : viewport y ∈ [0, fbH - mapTopY].
+        {
+            int panelH = fbH - mapTopY;   // hauteur du panneau planisphère
+            glViewport(splitX, 0, fbW - splitX, panelH);
+            glScissor (splitX, 0, fbW - splitX, panelH);
+
+            // Projection ortho calée sur le panneau planisphère :
+            //   x : [splitX, fbW]       → NDC [−1, +1]
+            //   y : [mapTopY, fbH]      → NDC [+1, −1]  (y écran croît vers le bas)
+            // Avec ce mapping, project() retourne des coords pixels absolus dans
+            // [splitX..fbW] × [mapTopY..fbH] et ils se projettent correctement.
+            glm::mat4 proj2D_panel = glm::ortho(
+                static_cast<float>(splitX),
+                static_cast<float>(fbW),
+                static_cast<float>(fbH),        // bottom (screen y max → NDC −1)
+                static_cast<float>(mapTopY),    // top    (screen y min → NDC +1)
+                -1.0f, 1.0f);
+
+            glUseProgram(shader2D);
+            glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_panel));
+
+            // Fond, graticule, marqueurs (via la classe Planisphere)
+            gMap.drawBackground(dyn2, loc2D_Color, splitX, fbW, fbH);
+            gMap.drawGraticule (dyn2, loc2D_Color, splitX, fbW, fbH);
+            for (const auto& wp : gWaypoints)
+                gMap.drawWaypoint(dyn2, loc2D_Color, splitX, fbW, fbH, wp);
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        // SÉPARATEURS + POIGNÉES
+        // ══════════════════════════════════════════════════════════════════════
+        // On repasse au viewport/scissor global pour dessiner par-dessus tout.
+        glViewport(0, 0, fbW, fbH);
+        glScissor (0, 0, fbW, fbH);
         glUseProgram(shader2D);
         glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
 
         {
-            float sx = static_cast<float>(splitX);
+            float sx  = static_cast<float>(splitX);
+            float mty = static_cast<float>(mapTopY);
+            float fw  = static_cast<float>(fbW);
+            float fh  = static_cast<float>(fbH);
 
-            // Barre fine (2 px de large)
-            draw_2d(dyn2, make_rect(sx - 1.0f, 0.0f, sx + 1.0f, (float)fbH),
+            // ── Séparateur VERTICAL (3D / planisphère) ─────────────────────
+            // Barre fine 2 px, sur toute la hauteur
+            draw_2d(dyn2, make_rect(sx - 1.0f, 0.0f, sx + 1.0f, fh),
                     GL_TRIANGLES, loc2D_Color, { 0.50f, 0.72f, 1.0f, 1.0f });
-
-            // Poignée centrale (rectangle plus large, 8 px × 40 px)
-            float mid = fbH * 0.5f;
-            draw_2d(dyn2, make_rect(sx - 4.0f, mid - 20.0f, sx + 4.0f, mid + 20.0f),
+            // Poignée (8 × 40 px, centrée sur la hauteur de la fenêtre)
+            float midV = fh * 0.5f;
+            draw_2d(dyn2, make_rect(sx - 4.0f, midV - 20.0f, sx + 4.0f, midV + 20.0f),
                     GL_TRIANGLES, loc2D_Color, { 0.70f, 0.85f, 1.0f, 1.0f });
+
+            // ── Séparateur HORIZONTAL (menu / planisphère, panneau droit) ──
+            if (mapTopY > 0)
+            {
+                // Barre fine 2 px, sur toute la largeur du panneau droit
+                draw_2d(dyn2, make_rect(sx, mty - 1.0f, fw, mty + 1.0f),
+                        GL_TRIANGLES, loc2D_Color, { 0.50f, 0.72f, 1.0f, 1.0f });
+                // Poignée (40 × 8 px, centrée horizontalement dans le panneau droit)
+                float midH = sx + (fw - sx) * 0.5f;
+                draw_2d(dyn2, make_rect(midH - 20.0f, mty - 4.0f, midH + 20.0f, mty + 4.0f),
+                        GL_TRIANGLES, loc2D_Color, { 0.70f, 0.85f, 1.0f, 1.0f });
+            }
         }
 
         // Échange les buffers front/back (double buffering)
@@ -631,6 +714,7 @@ int main()
     glDeleteProgram(shaderFlat3D);
     glDeleteProgram(shader2D);
     glfwDestroyCursor(gCurResize);
+    glfwDestroyCursor(gCurVResize);
     glfwDestroyCursor(gCurArrow);
     glfwTerminate();
     return 0;

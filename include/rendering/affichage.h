@@ -231,11 +231,14 @@ std::vector<float> make_rect(float x0, float y0, float x1, float y1);
 class Planisphere
 {
 public:
-    float ctrLon = 0.0f;    // Longitude centre de vue (°, NON borné — gère le loop)
-    float ctrLat = 0.0f;    // Latitude  centre de vue (°)
-    float zoom   = 1.0f;    // Facteur de zoom
+    float ctrLon  = 0.0f;    // Longitude centre de vue (°, NON borné — gère le loop)
+    float ctrLat  = 0.0f;    // Latitude  centre de vue (°)
+    float zoom    = 1.0f;    // Facteur de zoom
+    int   panelTop = 0;      // Y écran (pixels, depuis le haut) où commence le panneau
+                              // planisphère. Mis à jour chaque frame depuis mapTopFrac.
+                              // 0 = planisphère commence en haut du panneau droit.
 
-    static constexpr float ZOOM_MIN = 1.0f;    // Carte ≥ hauteur fenêtre
+    static constexpr float ZOOM_MIN = 1.0f;    // Carte ≥ hauteur panneau
     static constexpr float ZOOM_MAX = 25.0f;   // Zoom maximum
 
     // ── Maths projection ──────────────────────────────────────────────────────

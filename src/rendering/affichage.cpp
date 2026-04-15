@@ -462,11 +462,12 @@ std::vector<float> make_rect(float x0, float y0, float x1, float y1)
 // =============================================================================
 
 // ── pixPerDeg ─────────────────────────────────────────────────────────────────
-// À zoom=1 : 180° de latitude tiennent dans winH pixels → 1° = winH/180 px.
-// À zoom=2 : les pixels sont deux fois plus grands → 1° = winH/180·2 px.
+// À zoom=1 : 180° de latitude tiennent dans la HAUTEUR DU PANNEAU pixels.
+// La hauteur du panneau = winH − panelTop (winH = fbH total de la fenêtre).
 float Planisphere::pixPerDeg(int winH) const
 {
-    return (static_cast<float>(winH) / 180.0f) * zoom;
+    int panelH = winH - panelTop;
+    return (static_cast<float>(panelH) / 180.0f) * zoom;
 }
 
 // ── halfVisLon ────────────────────────────────────────────────────────────────
@@ -490,12 +491,14 @@ glm::vec2 Planisphere::project(float lon, float lat,
                                 int splitX, int winW, int winH) const
 {
     int   panelW = winW - splitX;
-    float ppd    = pixPerDeg(winH);
+    int   panelH = winH - panelTop;
+    float ppd    = pixPerDeg(winH);   // utilise panelH en interne
 
     // Abscisse du centre du panneau droit en pixels absolus
     float cx = static_cast<float>(splitX) + static_cast<float>(panelW) * 0.5f;
-    // Ordonnée du centre de la fenêtre (y=0 en haut)
-    float cy = static_cast<float>(winH) * 0.5f;
+    // Ordonnée du CENTRE DU PANNEAU en coordonnées écran (y=0 en haut).
+    // Le panneau commence à panelTop, donc son centre est à panelTop + panelH/2.
+    float cy = static_cast<float>(panelTop) + static_cast<float>(panelH) * 0.5f;
 
     return {
         cx + (lon - ctrLon) * ppd,   // +lon → droite
@@ -521,8 +524,11 @@ void Planisphere::clampLat()
 void Planisphere::drawBackground(DynBuf2D& buf, GLint locColor,
                                   int splitX, int winW, int winH) const
 {
-    auto bg = make_rect(static_cast<float>(splitX), 0.0f,
-                        static_cast<float>(winW),   static_cast<float>(winH));
+    // Le fond commence à panelTop (pas à 0) pour ne pas recouvrir le menu.
+    auto bg = make_rect(static_cast<float>(splitX),
+                        static_cast<float>(panelTop),
+                        static_cast<float>(winW),
+                        static_cast<float>(winH));
     draw_2d(buf, bg, GL_TRIANGLES, locColor, { 0.04f, 0.07f, 0.13f, 1.0f });
 }
 
