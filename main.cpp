@@ -19,6 +19,11 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+// Dear ImGui
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
+
 // Toutes les structures de rendu (WayPoint, Planisphere, DynBuf*, SphereGPU…)
 #include "rendering/affichage.h"
 #include "rendering/menu.h"
@@ -124,9 +129,16 @@ static void framebuffer_size_callback(GLFWwindow*, int w, int h)
 }
 
 // ── Bouton souris ─────────────────────────────────────────────────────────────
-static void mouse_button_callback(GLFWwindow* window, int button, int action, int)
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 {
+    // Forward vers ImGui (input dans les fenêtres ImGui)
+    ImGui_ImplGlfw_MouseButtonCallback(window, button, action, mods);
+
     if (button != GLFW_MOUSE_BUTTON_LEFT) return;
+
+    // Si ImGui capture la souris (clic sur un widget ImGui), on ne traite pas
+    // l'événement sauf si un drag de séparateur est déjà en cours.
+    if (ImGui::GetIO().WantCaptureMouse && !dragSplit && !dragMapTop) return;
 
     if (action == GLFW_PRESS)
     {
@@ -165,6 +177,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
 // ── Mouvement de la souris ────────────────────────────────────────────────────
 static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos)
 {
+    ImGui_ImplGlfw_CursorPosCallback(window, xpos, ypos);
     float dx = static_cast<float>(xpos) - lastMX;
     float dy = static_cast<float>(ypos) - lastMY;
 
@@ -223,8 +236,11 @@ static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos)
 }
 
 // ── Molette ───────────────────────────────────────────────────────────────────
-static void scroll_callback(GLFWwindow* window, double, double yoffset)
+static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 {
+    ImGui_ImplGlfw_ScrollCallback(window, xoffset, yoffset);
+    if (ImGui::GetIO().WantCaptureMouse) return;   // ImGui consomme le scroll
+
     double cx, cy;
     glfwGetCursorPos(window, &cx, &cy);
 
@@ -249,8 +265,9 @@ static void scroll_callback(GLFWwindow* window, double, double yoffset)
 }
 
 // ── Clavier ───────────────────────────────────────────────────────────────────
-static void key_callback(GLFWwindow* window, int key, int, int action, int)
+static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
+    ImGui_ImplGlfw_KeyCallback(window, key, scancode, action, mods);
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 }
@@ -441,6 +458,33 @@ int main()
         return -1;
     }
 
+    // ── Initialisation Dear ImGui ─────────────────────────────────────────────
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;   // pas de fichier imgui.ini (état mémorisé en RAM)
+
+    // Thème sombre personnalisé : on part du thème dark standard et on l'ajuste.
+    ImGui::StyleColorsDark();
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding    = 0.0f;
+    style.ScrollbarRounding = 0.0f;
+    style.GrabRounding      = 2.0f;
+    style.Colors[ImGuiCol_Text] = ImVec4(0.88f, 0.92f, 0.98f, 1.0f);
+
+    // Chargement de la police système (Windows).
+    // Segoe UI supporte tous les caractères latins (accents français inclus).
+    // Si le fichier est absent, ImGui retombe sur sa police embarquée (ASCII seul).
+    ImFont* font = io.Fonts->AddFontFromFileTTF(
+        "C:\\Windows\\Fonts\\segoeui.ttf", 14.0f);
+    if (!font)
+        io.Fonts->AddFontDefault();
+
+    // Backends GLFW + OpenGL 3.3 Core.
+    // install_callbacks = false : on gère les callbacks manuellement (chaining).
+    ImGui_ImplGlfw_InitForOpenGL(gWindow, /*install_callbacks=*/false);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
     // ── Enregistrement des callbacks ──────────────────────────────────────────
     glfwSetFramebufferSizeCallback(gWindow, framebuffer_size_callback);
     glfwSetMouseButtonCallback    (gWindow, mouse_button_callback);
@@ -528,6 +572,11 @@ int main()
     while (!glfwWindowShouldClose(gWindow))
     {
         glfwPollEvents();   // Traite les événements GLFW (clavier, souris…)
+
+        // ── Nouvelle frame ImGui ───────────────────────────────────────────────
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
 
         // Dimensions actuelles du framebuffer
         int fbW, fbH;
@@ -620,11 +669,15 @@ int main()
         //            en OpenGL = [fbH - mapTopY .. fbH]
         if (mapTopY > 0)
         {
+            // Fond OpenGL (zone sombre derrière les boutons ImGui)
             glViewport(0, 0, fbW, fbH);
             glScissor(splitX, fbH - mapTopY, fbW - splitX, mapTopY);
             glUseProgram(shader2D);
             glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
             gMenu.draw(dyn2, loc2D_Color, splitX, fbW, fbH, mapTopY);
+
+            // Boutons ImGui (rendus à la fin de la frame, cf. ImGui::Render() plus bas)
+            gMenu.drawImGui(splitX, fbW, mapTopY);
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -697,11 +750,22 @@ int main()
             }
         }
 
+        // ── Rendu ImGui (toujours en dernier, par-dessus tout le reste) ──────
+        // Remet le viewport complet avant de laisser ImGui dessiner.
+        glViewport(0, 0, fbW, fbH);
+        glScissor (0, 0, fbW, fbH);
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
         // Échange les buffers front/back (double buffering)
         glfwSwapBuffers(gWindow);
     }
 
     // ── Nettoyage ─────────────────────────────────────────────────────────────
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
     glDeleteVertexArrays(1, &sphere.vao);
     glDeleteBuffers(1, &sphere.vbo);
     glDeleteBuffers(1, &sphere.ebo);

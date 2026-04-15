@@ -9,15 +9,12 @@
 // Il est rendu EN DESSOUS du planisphère : quand mapTopY < HEIGHT, le
 // planisphère le recouvre partiellement ou totalement.
 //
-// Les boutons sont pour l'instant des rectangles colorés (les labels texte
-// seront ajoutés lors de l'intégration ImGui).
-//
 // BOUTONS (dans l'ordre, de haut en bas) :
-//   0 — Ajouter un satellite          (accent vert)
-//   1 — Ajouter une zone d'att.        (accent cyan)
-//   2 — Réinitialiser                  (accent orange)
-//   3 — Contrôles                      (accent violet)
-//   4 — Supprimer objet                (accent rouge)
+//   0 — Ajouter un satellite
+//   1 — Ajouter une zone d'atterrissage
+//   2 — Réinitialiser
+//   3 — Contrôles
+//   4 — Supprimer objet
 // =============================================================================
 
 #include <glad/glad.h>
@@ -43,15 +40,25 @@ struct Menu
         + N_BUTTONS  * BUTTON_H
         + (N_BUTTONS - 1) * BUTTON_GAP;
 
-    // ── Dessin ────────────────────────────────────────────────────────────────
+    // ── Dessin OpenGL (fond sombre) ───────────────────────────────────────────
     //
-    // Rend le menu dans la zone [splitX, 0] → [fbW, mapTopY] en coordonnées
-    // pixels-écran (y=0 en haut).
+    // Rend uniquement le fond de la zone menu via le shader 2D.
+    // Les boutons sont rendus par drawImGui() — appelé séparément.
     //
-    // Le shader 2D doit déjà être actif avec une projection ortho couvrant
-    // toute la fenêtre (0, fbW, fbH, 0).
-    //
-    // Si mapTopY <= 0 la fonction retourne immédiatement (rien à dessiner).
+    // Si mapTopY <= 0 la fonction retourne immédiatement.
     void draw(DynBuf2D& buf, GLint locColor,
               int splitX, int fbW, int fbH, int mapTopY) const;
+
+    // ── Dessin ImGui (boutons avec labels) ───────────────────────────────────
+    //
+    // Crée une fenêtre ImGui ancrée en haut du panneau droit.
+    // Doit être appelé entre ImGui::NewFrame() et ImGui::Render().
+    //
+    // Paramètres en pixels-écran (y=0 en haut, convention GLFW/ImGui) :
+    //   splitX  : bord gauche du panneau droit
+    //   fbW     : largeur totale du framebuffer
+    //   mapTopY : hauteur disponible pour le menu (= Y où commence le planisphère)
+    //
+    // Si mapTopY <= 0, la fenêtre n'est pas affichée.
+    void drawImGui(int splitX, int fbW, int mapTopY) const;
 };

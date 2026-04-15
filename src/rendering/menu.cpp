@@ -3,31 +3,18 @@
 //
 // Voir menu.h pour la documentation de l'interface.
 //
-// Rendu actuel : rectangles colorés (labels texte → ImGui, étape suivante).
-// Chaque bouton a :
-//   • Un fond sombre uniforme
-//   • Une barre d'accent colorée sur le bord gauche (4 px)
-//   • Un cadre fin (GL_LINES)
+// draw()       : fond sombre via OpenGL (rectangle plein)
+// drawImGui()  : boutons avec labels texte via Dear ImGui
 // =============================================================================
 
 #include "rendering/menu.h"
 
+#include <imgui.h>
 #include <glm/gtc/type_ptr.hpp>
 
 
-// ── Couleurs d'accent par bouton ──────────────────────────────────────────────
-// (dans l'ordre déclaré dans menu.h)
-static const glm::vec4 ACCENT_COLORS[Menu::N_BUTTONS] = {
-    { 0.20f, 0.72f, 0.42f, 1.0f },   // 0 — Ajouter un satellite     (vert)
-    { 0.18f, 0.62f, 0.82f, 1.0f },   // 1 — Zone d'atterrissage      (cyan)
-    { 0.92f, 0.52f, 0.10f, 1.0f },   // 2 — Réinitialiser             (orange)
-    { 0.52f, 0.42f, 0.92f, 1.0f },   // 3 — Contrôles                (violet)
-    { 0.82f, 0.22f, 0.18f, 1.0f },   // 4 — Supprimer objet           (rouge)
-};
-
-
 // =============================================================================
-// Menu::draw
+// Menu::draw — fond OpenGL seulement
 // =============================================================================
 
 void Menu::draw(DynBuf2D& buf, GLint locColor,
@@ -35,45 +22,115 @@ void Menu::draw(DynBuf2D& buf, GLint locColor,
 {
     if (mapTopY <= 0) return;
 
-    const float x0 = static_cast<float>(splitX);
-    const float x1 = static_cast<float>(fbW);
+    // Fond de la zone menu (ImGui dessinera ses éléments par-dessus)
+    draw_2d(buf,
+            make_rect(static_cast<float>(splitX), 0.0f,
+                      static_cast<float>(fbW),    static_cast<float>(mapTopY)),
+            GL_TRIANGLES, locColor,
+            { 0.05f, 0.08f, 0.13f, 1.0f });
+}
 
-    // ── Fond général du menu ──────────────────────────────────────────────────
-    draw_2d(buf, make_rect(x0, 0.0f, x1, static_cast<float>(mapTopY)),
-            GL_TRIANGLES, locColor, { 0.05f, 0.08f, 0.13f, 1.0f });
 
-    // ── Titre / séparation haute (barre fine en haut du menu) ─────────────────
-    // Bande colorée de 2 px en haut pour délimiter visuellement le menu.
-    draw_2d(buf, make_rect(x0, 0.0f, x1, 2.0f),
-            GL_TRIANGLES, locColor, { 0.30f, 0.55f, 0.85f, 1.0f });
+// =============================================================================
+// Menu::drawImGui — boutons ImGui avec labels
+// =============================================================================
 
-    // ── Boutons ───────────────────────────────────────────────────────────────
-    constexpr float ACCENT_W = 4.0f;   // largeur de la barre d'accent gauche
+void Menu::drawImGui(int splitX, int fbW, int mapTopY) const
+{
+    if (mapTopY <= 0) return;
 
-    const float btnX0 = x0 + PADDING;
-    const float btnX1 = x1 - PADDING;
+    // ── Fenêtre ancrée — position et taille fixes chaque frame ───────────────
+    ImGui::SetNextWindowPos (ImVec2(static_cast<float>(splitX), 0.0f),
+                             ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(fbW - splitX),
+                                    static_cast<float>(mapTopY)),
+                             ImGuiCond_Always);
 
-    for (int i = 0; i < N_BUTTONS; ++i)
+    // ── Style de fenêtre ──────────────────────────────────────────────────────
+    // Couleurs et marges adaptées au thème sombre du projet.
+    // Poussés AVANT Begin() → s'appliquent à la fenêtre.
+    ImGui::PushStyleColor(ImGuiCol_WindowBg,  ImVec4(0.05f, 0.08f, 0.13f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Border,    ImVec4(0.22f, 0.40f, 0.58f, 1.0f));
+    ImGui::PushStyleVar  (ImGuiStyleVar_WindowPadding, ImVec2(PADDING, PADDING));
+    ImGui::PushStyleVar  (ImGuiStyleVar_FrameRounding, 3.0f);
+    ImGui::PushStyleVar  (ImGuiStyleVar_WindowBorderSize, 1.0f);
+
+    constexpr ImGuiWindowFlags kFlags =
+        ImGuiWindowFlags_NoTitleBar        |
+        ImGuiWindowFlags_NoResize          |
+        ImGuiWindowFlags_NoMove            |
+        ImGuiWindowFlags_NoScrollbar       |
+        ImGuiWindowFlags_NoSavedSettings   |
+        ImGuiWindowFlags_NoBringToDisplayFront;
+
+    if (ImGui::Begin("##OrbitalMenu", nullptr, kFlags))
     {
-        const float by0 = PADDING + static_cast<float>(i) * (BUTTON_H + BUTTON_GAP);
-        const float by1 = by0 + BUTTON_H;
+        const float btnW = ImGui::GetContentRegionAvail().x;
 
-        // Fond du bouton (légèrement plus clair que le fond du menu)
-        draw_2d(buf, make_rect(btnX0, by0, btnX1, by1),
-                GL_TRIANGLES, locColor, { 0.10f, 0.15f, 0.22f, 1.0f });
+        // Espacement entre les boutons
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                            ImVec2(0.0f, BUTTON_GAP));
 
-        // Barre d'accent gauche (couleur distinctive du bouton)
-        draw_2d(buf, make_rect(btnX0, by0, btnX0 + ACCENT_W, by1),
-                GL_TRIANGLES, locColor, ACCENT_COLORS[i]);
-
-        // Cadre du bouton (4 segments GL_LINES, couleur neutre)
-        const std::vector<float> border = {
-            btnX0, by0,   btnX1, by0,   // arête haute
-            btnX1, by0,   btnX1, by1,   // arête droite
-            btnX1, by1,   btnX0, by1,   // arête basse
-            btnX0, by1,   btnX0, by0    // arête gauche
+        // ── Définition des boutons ────────────────────────────────────────────
+        // Chaque bouton a 3 couleurs : repos / survol / clic.
+        // La couleur de base est une version sombre de la teinte d'accent pour
+        // rester lisible sur fond noir, et s'illumine au survol/clic.
+        struct BtnDef {
+            const char* label;
+            ImVec4      col;     // état normal
+            ImVec4      colHov;  // survol
+            ImVec4      colAct;  // clic
         };
-        draw_2d(buf, border, GL_LINES, locColor,
-                { 0.22f, 0.38f, 0.55f, 1.0f });
+
+        static const BtnDef kBtns[N_BUTTONS] = {
+            {   // 0 — Ajouter un satellite (vert)
+                "Ajouter un satellite",
+                ImVec4(0.08f, 0.28f, 0.14f, 1.0f),
+                ImVec4(0.13f, 0.44f, 0.22f, 1.0f),
+                ImVec4(0.20f, 0.72f, 0.42f, 1.0f)
+            },
+            {   // 1 — Ajouter une zone d'atterrissage (cyan)
+                "Ajouter une zone d'atterrissage",
+                ImVec4(0.06f, 0.22f, 0.30f, 1.0f),
+                ImVec4(0.10f, 0.36f, 0.50f, 1.0f),
+                ImVec4(0.18f, 0.62f, 0.82f, 1.0f)
+            },
+            {   // 2 — Réinitialiser (orange)
+                "R\xc3\xa9initialiser",
+                ImVec4(0.32f, 0.18f, 0.03f, 1.0f),
+                ImVec4(0.52f, 0.30f, 0.05f, 1.0f),
+                ImVec4(0.92f, 0.52f, 0.10f, 1.0f)
+            },
+            {   // 3 — Contrôles (violet)
+                "Contr\xc3\xb4les",
+                ImVec4(0.18f, 0.14f, 0.32f, 1.0f),
+                ImVec4(0.30f, 0.24f, 0.52f, 1.0f),
+                ImVec4(0.52f, 0.42f, 0.92f, 1.0f)
+            },
+            {   // 4 — Supprimer objet (rouge)
+                "Supprimer objet",
+                ImVec4(0.28f, 0.08f, 0.07f, 1.0f),
+                ImVec4(0.46f, 0.13f, 0.11f, 1.0f),
+                ImVec4(0.82f, 0.22f, 0.18f, 1.0f)
+            },
+        };
+
+        for (const auto& b : kBtns)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Button,        b.col);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, b.colHov);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  b.colAct);
+
+            // Le bouton retourne true si cliqué — actions à brancher plus tard
+            ImGui::Button(b.label, ImVec2(btnW, BUTTON_H));
+
+            ImGui::PopStyleColor(3);
+        }
+
+        ImGui::PopStyleVar();   // ItemSpacing
     }
+    ImGui::End();
+
+    ImGui::PopStyleVar  (3);   // WindowBorderSize, FrameRounding, WindowPadding
+    ImGui::PopStyleColor(2);   // Border, WindowBg
 }

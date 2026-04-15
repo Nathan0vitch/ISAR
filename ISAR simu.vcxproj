@@ -143,6 +143,12 @@
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="src\rendering\affichage.cpp" />
     <ClCompile Include="src\rendering\menu.cpp" />
+    <ClCompile Include="src\imgui.cpp" />
+    <ClCompile Include="src\imgui_draw.cpp" />
+    <ClCompile Include="src\imgui_impl_glfw.cpp" />
+    <ClCompile Include="src\imgui_impl_opengl3.cpp" />
+    <ClCompile Include="src\imgui_tables.cpp" />
+    <ClCompile Include="src\imgui_widgets.cpp" />
     <ClCompile Include="nrlmsise-00\nrlmsise-00.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
@@ -153,6 +159,11 @@
   <ItemGroup>
     <ClInclude Include="include\rendering\affichage.h" />
     <ClInclude Include="include\rendering\menu.h" />
+    <ClInclude Include="include\imgui.h" />
+    <ClInclude Include="include\imgui_impl_glfw.h" />
+    <ClInclude Include="include\imgui_impl_opengl3.h" />
+    <ClInclude Include="include\imgui_impl_opengl3_loader.h" />
+    <ClInclude Include="include\imgui_internal.h" />
     <ClInclude Include="nrlmsise-00\nrlmsise-00.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
