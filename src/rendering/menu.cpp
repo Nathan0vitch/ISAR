@@ -55,13 +55,12 @@ void Menu::drawImGui(int splitX, int fbW, int mapTopY) const
     ImGui::PushStyleVar  (ImGuiStyleVar_FrameRounding, 3.0f);
     ImGui::PushStyleVar  (ImGuiStyleVar_WindowBorderSize, 1.0f);
 
-    constexpr ImGuiWindowFlags kFlags =
-        ImGuiWindowFlags_NoTitleBar        |
-        ImGuiWindowFlags_NoResize          |
-        ImGuiWindowFlags_NoMove            |
-        ImGuiWindowFlags_NoScrollbar       |
-        ImGuiWindowFlags_NoSavedSettings   |
-        ImGuiWindowFlags_NoBringToDisplayFront;
+    const ImGuiWindowFlags kFlags =
+        ImGuiWindowFlags_NoTitleBar      |
+        ImGuiWindowFlags_NoResize        |
+        ImGuiWindowFlags_NoMove          |
+        ImGuiWindowFlags_NoScrollbar     |
+        ImGuiWindowFlags_NoSavedSettings;
 
     if (ImGui::Begin("##OrbitalMenu", nullptr, kFlags))
     {
