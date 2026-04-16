@@ -143,6 +143,7 @@
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="src\rendering\affichage.cpp" />
     <ClCompile Include="src\rendering\menu.cpp" />
+    <ClCompile Include="src\simulation\Satellite.cpp" />
     <ClCompile Include="src\imgui.cpp" />
     <ClCompile Include="src\imgui_draw.cpp" />
     <ClCompile Include="src\imgui_impl_glfw.cpp" />
@@ -159,6 +160,7 @@
   <ItemGroup>
     <ClInclude Include="include\rendering\affichage.h" />
     <ClInclude Include="include\rendering\menu.h" />
+    <ClInclude Include="include\simulation\Satellite.h" />
     <ClInclude Include="include\imgui.h" />
     <ClInclude Include="include\imgui_impl_glfw.h" />
     <ClInclude Include="include\imgui_impl_opengl3.h" />

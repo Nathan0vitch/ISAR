@@ -27,9 +27,11 @@
 // Toutes les structures de rendu (WayPoint, Planisphere, DynBuf*, SphereGPU…)
 #include "rendering/affichage.h"
 #include "rendering/menu.h"
+#include "simulation/Satellite.h"
 
 #include <iostream>
 #include <vector>
+#include <string>
 #include <cmath>
 
 
@@ -55,6 +57,9 @@ static float mapTopFrac = 0.0f;
 
 // ── Instance du menu ──────────────────────────────────────────────────────────
 static Menu gMenu;
+
+// ── Liste des satellites ajoutés par l'utilisateur ────────────────────────────
+static std::vector<Satellite> gSatellites;
 
 // ── Caméra 3D (arcball) ───────────────────────────────────────────────────────
 // L'arcball place la caméra sur une sphère centrée sur l'origine.
@@ -651,6 +656,50 @@ int main()
             draw_3d(dyn3, waypointMesh3D[i], gWaypoints[i].glMode(),
                     locF_Color, gWaypoints[i].color);
 
+        // ── Satellites : orbites + marqueurs Ap/Pe/AN/DN (style KSP) ─────────
+        // Génère une croix 3D centrée en `p` de demi-longueur `r` (6 sommets).
+        auto makeCross3 = [](glm::vec3 p, float r) -> std::vector<float> {
+            return {
+                p.x - r, p.y,     p.z,      p.x + r, p.y,     p.z,
+                p.x,     p.y - r, p.z,      p.x,     p.y + r, p.z,
+                p.x,     p.y,     p.z - r,  p.x,     p.y,     p.z + r,
+            };
+        };
+
+        for (const auto& sat : gSatellites)
+        {
+            // -- Ellipse orbitale (GL_LINE_LOOP, couleur du satellite) ----------
+            draw_3d(dyn3, sat.orbitVerts, GL_LINE_LOOP, locF_Color, sat.color);
+
+            // -- Ligne des nœuds (AN → DN, vert atténué) ----------------------
+            std::vector<float> nodeLine = {
+                sat.anECI.x, sat.anECI.y, sat.anECI.z,
+                sat.dnECI.x, sat.dnECI.y, sat.dnECI.z,
+            };
+            draw_3d(dyn3, nodeLine, GL_LINES, locF_Color,
+                    { 0.15f, 0.90f, 0.35f, 0.55f });
+
+            // -- Apogée (bleu ciel) -------------------------------------------
+            draw_3d(dyn3, makeCross3(sat.apECI, 0.035f), GL_LINES, locF_Color,
+                    { 0.35f, 0.72f, 1.0f, 1.0f });
+
+            // -- Périgée (orange chaud) ----------------------------------------
+            draw_3d(dyn3, makeCross3(sat.peECI, 0.035f), GL_LINES, locF_Color,
+                    { 1.0f, 0.55f, 0.15f, 1.0f });
+
+            // -- Nœud ascendant (vert vif) ------------------------------------
+            draw_3d(dyn3, makeCross3(sat.anECI, 0.030f), GL_LINES, locF_Color,
+                    { 0.15f, 1.0f, 0.40f, 1.0f });
+
+            // -- Nœud descendant (rouge-brique) --------------------------------
+            draw_3d(dyn3, makeCross3(sat.dnECI, 0.030f), GL_LINES, locF_Color,
+                    { 1.0f, 0.28f, 0.28f, 0.85f });
+
+            // -- Position courante du satellite (couleur du satellite, plus grande)
+            draw_3d(dyn3, makeCross3(sat.posECI, 0.055f), GL_LINES, locF_Color,
+                    sat.color);
+        }
+
         // ── Projection ortho pleine fenêtre (partagée par menu et séparateurs) ──
         // Coordonnées écran : x ∈ [0, fbW], y ∈ [0, fbH] (y=0 en haut)
         glm::mat4 proj2D_full = glm::ortho(0.0f, static_cast<float>(fbW),
@@ -676,8 +725,27 @@ int main()
             glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
             gMenu.draw(dyn2, loc2D_Color, splitX, fbW, fbH, mapTopY);
 
-            // Boutons ImGui (rendus à la fin de la frame, cf. ImGui::Render() plus bas)
-            gMenu.drawImGui(splitX, fbW, mapTopY);
+            // Boutons ImGui (rendus à la fin de la frame, cf. ImGui::Render() plus bas).
+            // Retourne true quand l'utilisateur valide "Ajouter" dans le formulaire.
+            if (gMenu.drawImGui(splitX, fbW, mapTopY))
+            {
+                // Palette de couleurs pour différencier les satellites
+                static const glm::vec4 kPalette[] = {
+                    { 1.0f, 0.85f, 0.20f, 1.0f },   // or
+                    { 0.20f, 1.0f, 0.55f, 1.0f },   // vert menthe
+                    { 0.35f, 0.70f, 1.0f, 1.0f },   // bleu ciel
+                    { 1.0f, 0.45f, 0.10f, 1.0f },   // orange
+                    { 0.80f, 0.25f, 1.0f, 1.0f },   // violet
+                    { 1.0f, 0.30f, 0.45f, 1.0f },   // rose
+                };
+                Satellite sat;
+                sat.orbital  = gMenu.pendingOrbit;
+                sat.physical = gMenu.pendingPhysics;
+                sat.name     = "SAT-" + std::to_string(gSatellites.size() + 1);
+                sat.color    = kPalette[gSatellites.size() % 6];
+                sat.buildGeometry();
+                gSatellites.push_back(std::move(sat));
+            }
         }
 
         // ══════════════════════════════════════════════════════════════════════

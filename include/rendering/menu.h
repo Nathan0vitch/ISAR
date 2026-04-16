@@ -1,15 +1,16 @@
 #pragma once
 // =============================================================================
-// menu.h — Panneau de boutons du planisphère, OrbitalSim
+// menu.h — Panneau de contrôle, OrbitalSim
 //
 // Le menu occupe la zone en haut à droite de la fenêtre, au-dessus du
 // planisphère. Sa hauteur est FIXE (HEIGHT pixels) pour rester toujours
 // lisible. Il s'élargit horizontalement avec le panneau droit (splitX).
 //
-// Il est rendu EN DESSOUS du planisphère : quand mapTopY < HEIGHT, le
-// planisphère le recouvre partiellement ou totalement.
+// PANNEAUX (machine d'état interne) :
+//   MenuPanel::Main          — 5 boutons principaux
+//   MenuPanel::AddSatellite  — formulaire "Nouveau satellite"
 //
-// BOUTONS (dans l'ordre, de haut en bas) :
+// BOUTONS principaux :
 //   0 — Ajouter un satellite
 //   1 — Ajouter une zone d'atterrissage
 //   2 — Réinitialiser
@@ -19,46 +20,51 @@
 
 #include <glad/glad.h>
 #include <glm/glm.hpp>
-#include "rendering/affichage.h"   // DynBuf2D, draw_2d, make_rect
+#include "rendering/affichage.h"    // DynBuf2D, draw_2d, make_rect
+#include "simulation/Satellite.h"  // OrbitalParams, PhysicalParams, Satellite
+
+#include <vector>
+
+
+// =============================================================================
+// MenuPanel — état courant du panneau
+// =============================================================================
+enum class MenuPanel { Main, AddSatellite };
 
 
 // =============================================================================
 // Menu
 // =============================================================================
-
 struct Menu
 {
-    // ── Dimensions (constantes, en pixels) ───────────────────────────────────
-    static constexpr float BUTTON_H   = 34.0f;   // Hauteur d'un bouton
-    static constexpr float BUTTON_GAP =  6.0f;   // Espacement vertical entre boutons
-    static constexpr float PADDING    = 10.0f;   // Marge (haut, bas, gauche, droite)
-    static constexpr int   N_BUTTONS  =  5;      // Nombre de boutons
+    // ── Dimensions constantes des boutons principaux (pixels) ─────────────────
+    static constexpr float BUTTON_H   = 34.0f;
+    static constexpr float BUTTON_GAP =  6.0f;
+    static constexpr float PADDING    = 10.0f;
+    static constexpr int   N_BUTTONS  =  5;
 
-    // Hauteur totale du menu (calculée une fois à la compilation)
+    // Hauteur minimale du menu principal
     static constexpr float HEIGHT =
         2.0f * PADDING
         + N_BUTTONS  * BUTTON_H
         + (N_BUTTONS - 1) * BUTTON_GAP;
 
-    // ── Dessin OpenGL (fond sombre) ───────────────────────────────────────────
-    //
-    // Rend uniquement le fond de la zone menu via le shader 2D.
-    // Les boutons sont rendus par drawImGui() — appelé séparément.
-    //
-    // Si mapTopY <= 0 la fonction retourne immédiatement.
+    // ── État de la machine d'état ─────────────────────────────────────────────
+    MenuPanel panel = MenuPanel::Main;
+
+    // Paramètres du satellite en cours de saisie
+    OrbitalParams  pendingOrbit;
+    PhysicalParams pendingPhysics;
+
+    // ── Dessin OpenGL (fond) ──────────────────────────────────────────────────
     void draw(DynBuf2D& buf, GLint locColor,
               int splitX, int fbW, int fbH, int mapTopY) const;
 
-    // ── Dessin ImGui (boutons avec labels) ───────────────────────────────────
+    // ── Dessin ImGui (boutons + formulaire) ───────────────────────────────────
     //
-    // Crée une fenêtre ImGui ancrée en haut du panneau droit.
-    // Doit être appelé entre ImGui::NewFrame() et ImGui::Render().
+    // Renvoie true quand l'utilisateur valide "Ajouter" :
+    //   → pendingOrbit et pendingPhysics contiennent le satellite à créer.
     //
-    // Paramètres en pixels-écran (y=0 en haut, convention GLFW/ImGui) :
-    //   splitX  : bord gauche du panneau droit
-    //   fbW     : largeur totale du framebuffer
-    //   mapTopY : hauteur disponible pour le menu (= Y où commence le planisphère)
-    //
-    // Si mapTopY <= 0, la fenêtre n'est pas affichée.
-    void drawImGui(int splitX, int fbW, int mapTopY) const;
+    // Non-const car la machine d'état et les champs du formulaire sont mutables.
+    bool drawImGui(int splitX, int fbW, int mapTopY);
 };
