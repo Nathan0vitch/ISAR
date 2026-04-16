@@ -3,6 +3,7 @@ C:\Users\natha\Documents\Estaca\P2I\ISAR simu\Main.cpp;C:\Users\natha\Documents\
 C:\Users\natha\Documents\Estaca\P2I\ISAR simu\src\nrlmsise-00.c;C:\Users\natha\Documents\Estaca\P2I\ISAR simu\ISAR simu\x64\Debug\nrlmsise-00.obj
 C:\Users\natha\Documents\Estaca\P2I\ISAR simu\src\rendering\affichage.cpp;C:\Users\natha\Documents\Estaca\P2I\ISAR simu\ISAR simu\x64\Debug\affichage.obj
 C:\Users\natha\Documents\Estaca\P2I\ISAR simu\src\rendering\menu.cpp;C:\Users\natha\Documents\Estaca\P2I\ISAR simu\ISAR simu\x64\Debug\menu.obj
+C:\Users\natha\Documents\Estaca\P2I\ISAR simu\src\simulation\Satellite.cpp;C:\Users\natha\Documents\Estaca\P2I\ISAR simu\ISAR simu\x64\Debug\Satellite.obj
 C:\Users\natha\Documents\Estaca\P2I\ISAR simu\src\imgui.cpp;C:\Users\natha\Documents\Estaca\P2I\ISAR simu\ISAR simu\x64\Debug\imgui.obj
 C:\Users\natha\Documents\Estaca\P2I\ISAR simu\src\imgui_draw.cpp;C:\Users\natha\Documents\Estaca\P2I\ISAR simu\ISAR simu\x64\Debug\imgui_draw.obj
 C:\Users\natha\Documents\Estaca\P2I\ISAR simu\src\imgui_impl_glfw.cpp;C:\Users\natha\Documents\Estaca\P2I\ISAR simu\ISAR simu\x64\Debug\imgui_impl_glfw.obj
