@@ -67,4 +67,9 @@ struct Menu
     //
     // Non-const car la machine d'état et les champs du formulaire sont mutables.
     bool drawImGui(int splitX, int fbW, int mapTopY);
+
+private:
+    // Sous-panneaux (appelés depuis drawImGui)
+    void drawMainPanel();       // 5 boutons principaux
+    bool drawSatelliteForm();   // formulaire "Nouveau satellite", retourne true sur "Ajouter"
 };

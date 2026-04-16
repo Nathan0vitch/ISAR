@@ -8,8 +8,6 @@
 #include "rendering/menu.h"
 
 #include <imgui.h>
-#include <glm/gtc/type_ptr.hpp>
-#include <cmath>
 #include <cstdio>   // snprintf
 
 
