@@ -1,5 +1,4 @@
 ﻿C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Microsoft\VC\v180\Microsoft.CppBuild.targets(1142,5): warning MSB8027: Deux ou plusieurs fichiers avec le nom nrlmsise-00.c généreront des sorties vers le même emplacement. Cela peut entraîner une génération incorrecte. Les fichiers impliqués sont src\nrlmsise-00.c, nrlmsise-00\nrlmsise-00.c.
-  Main.cpp
   menu.cpp
   Satellite.cpp
   Génération de code en cours...
