@@ -673,16 +673,27 @@ int main()
             glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
             gMenu.draw(dyn2, loc2D_Color, splitX, fbW, fbH, mapTopY);
 
-            if (gMenu.drawImGui(splitX, fbW, mapTopY))
             {
-                Satellite sat;
-                sat.orbital  = gMenu.pendingOrbit;
-                sat.physical = gMenu.pendingPhysics;
-                sat.name     = "SAT-" + std::to_string(gSatellites.size() + 1);
-                sat.color    = kPalette[gSatellites.size() % 6];
-                sat.buildGeometry();
-                sat.propagate();   // ← calcul RK4+J2 sur 3 jours
-                gSatellites.push_back(std::move(sat));
+                MenuAction act = gMenu.drawImGui(splitX, fbW, mapTopY);
+
+                if (act.addSatellite)
+                {
+                    Satellite sat;
+                    sat.orbital  = gMenu.pendingOrbit;
+                    sat.physical = gMenu.pendingPhysics;
+                    sat.name     = "SAT-" + std::to_string(gSatellites.size() + 1);
+                    sat.color    = kPalette[gSatellites.size() % 6];
+                    sat.buildGeometry();
+                    sat.propagate();   // ← calcul RK4+J2 sur 3 jours
+                    gSatellites.push_back(std::move(sat));
+                }
+
+                if (act.reset)
+                {
+                    gSatellites.clear();
+                    simTime   = 0.0;
+                    wallPrev  = glfwGetTime();   // évite un saut de dt au prochain frame
+                }
             }
         }
 

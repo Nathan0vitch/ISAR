@@ -33,6 +33,16 @@ enum class MenuPanel { Main, AddSatellite };
 
 
 // =============================================================================
+// MenuAction — résultat de drawImGui() pour un frame donné
+// =============================================================================
+struct MenuAction
+{
+    bool addSatellite = false;   // l'utilisateur a validé "Ajouter"
+    bool reset        = false;   // l'utilisateur a cliqué "Réinitialiser"
+};
+
+
+// =============================================================================
 // Menu
 // =============================================================================
 struct Menu
@@ -62,14 +72,15 @@ struct Menu
 
     // ── Dessin ImGui (boutons + formulaire) ───────────────────────────────────
     //
-    // Renvoie true quand l'utilisateur valide "Ajouter" :
-    //   → pendingOrbit et pendingPhysics contiennent le satellite à créer.
+    // Renvoie un MenuAction décrivant les événements du frame :
+    //   .addSatellite = true  → pendingOrbit / pendingPhysics prêts à être créés
+    //   .reset        = true  → demande de réinitialisation complète
     //
     // Non-const car la machine d'état et les champs du formulaire sont mutables.
-    bool drawImGui(int splitX, int fbW, int mapTopY);
+    MenuAction drawImGui(int splitX, int fbW, int mapTopY);
 
 private:
     // Sous-panneaux (appelés depuis drawImGui)
-    void drawMainPanel();       // 5 boutons principaux
+    void drawMainPanel(MenuAction& action);  // 5 boutons principaux
     bool drawSatelliteForm();   // formulaire "Nouveau satellite", retourne true sur "Ajouter"
 };

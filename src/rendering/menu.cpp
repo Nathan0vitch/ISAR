@@ -56,9 +56,10 @@ void Menu::draw(DynBuf2D& buf, GLint locColor,
 // =============================================================================
 // Menu::drawImGui
 // =============================================================================
-bool Menu::drawImGui(int splitX, int fbW, int mapTopY)
+MenuAction Menu::drawImGui(int splitX, int fbW, int mapTopY)
 {
-    if (mapTopY <= 0) return false;
+    MenuAction action;
+    if (mapTopY <= 0) return action;
 
     // ── Fenêtre ancrée ────────────────────────────────────────────────────────
     ImGui::SetNextWindowPos (ImVec2(static_cast<float>(splitX), 0.0f),
@@ -79,16 +80,14 @@ bool Menu::drawImGui(int splitX, int fbW, int mapTopY)
         ImGuiWindowFlags_NoMove          |
         ImGuiWindowFlags_NoSavedSettings;
 
-    bool addRequested = false;
-
     if (ImGui::Begin("##OrbitalMenu", nullptr, kWinFlags))
     {
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, BUTTON_GAP));
 
         if (panel == MenuPanel::Main)
-            drawMainPanel();
+            drawMainPanel(action);
         else if (panel == MenuPanel::AddSatellite)
-            addRequested = drawSatelliteForm();
+            action.addSatellite = drawSatelliteForm();
 
         ImGui::PopStyleVar();  // ItemSpacing
     }
@@ -97,14 +96,14 @@ bool Menu::drawImGui(int splitX, int fbW, int mapTopY)
     ImGui::PopStyleVar  (3);
     ImGui::PopStyleColor(2);
 
-    return addRequested;
+    return action;
 }
 
 
 // =============================================================================
 // drawMainPanel — 5 boutons principaux
 // =============================================================================
-void Menu::drawMainPanel()
+void Menu::drawMainPanel(MenuAction& action)
 {
     const float btnW = ImGui::GetContentRegionAvail().x;
 
@@ -132,12 +131,15 @@ void Menu::drawMainPanel()
         if (ImGui::Button(b.label, ImVec2(btnW, BUTTON_H)))
         {
             if (i == 0) {   // "Ajouter un satellite"
-                pendingOrbit  = OrbitalParams{};   // reset aux valeurs par défaut
+                pendingOrbit  = OrbitalParams{};
                 pendingPhysics= PhysicalParams{};
                 pendingOrbit.recalculate();
                 panel = MenuPanel::AddSatellite;
             }
-            // TODO : autres boutons
+            else if (i == 2) {   // "Réinitialiser"
+                action.reset = true;
+            }
+            // TODO : autres boutons (1, 3, 4)
         }
 
         ImGui::PopStyleColor(3);
