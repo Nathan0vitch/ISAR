@@ -3,7 +3,7 @@
 //
 // Ce fichier contient UNIQUEMENT :
 //   1. Initialisation de la fenêtre et d'OpenGL (GLFW + GLAD)
-//   2. Variables d'état globales (caméra, split, carte)
+//   2. Variables d'état globales (caméra, split, carte, simulation)
 //   3. Callbacks GLFW (clavier, souris, resize)
 //   4. Compilation des shaders GLSL
 //   5. Boucle de rendu principale
@@ -24,7 +24,6 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 
-// Toutes les structures de rendu (WayPoint, Planisphere, DynBuf*, SphereGPU…)
 #include "rendering/affichage.h"
 #include "rendering/menu.h"
 #include "simulation/Satellite.h"
@@ -33,6 +32,8 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <cstdio>   // snprintf
+#include <algorithm>
 
 
 // =============================================================================
@@ -40,79 +41,71 @@
 // =============================================================================
 
 // ── Dimensions du framebuffer ─────────────────────────────────────────────────
-// Mis à jour dans framebuffer_size_callback.
 static int WIN_W = 1400, WIN_H = 750;
 
 // ── Split panneau 3D / planisphère ────────────────────────────────────────────
-// splitFrac ∈ [0.15, 0.85] : fraction de WIN_W pour le panneau 3D (gauche).
-// Par défaut à 0.5 → moitié/moitié.
 static float splitFrac = 0.5f;
 
 // ── Split vertical du panneau droit (menu / planisphère) ─────────────────────
-// mapTopFrac ∈ [0, 0.85] : fraction de WIN_H à partir du haut où commence
-// le planisphère dans le panneau droit.
-// 0.0 → planisphère plein, menu entièrement caché derrière.
-// Augmenter → on révèle le menu au-dessus du planisphère.
 static float mapTopFrac = 0.0f;
 
 // ── Instance du menu ──────────────────────────────────────────────────────────
 static Menu gMenu;
 
-// ── Liste des satellites ajoutés par l'utilisateur ────────────────────────────
+// ── Liste des satellites ──────────────────────────────────────────────────────
 static std::vector<Satellite> gSatellites;
 
 // ── Caméra 3D (arcball) ───────────────────────────────────────────────────────
-// L'arcball place la caméra sur une sphère centrée sur l'origine.
-// camYaw  : rotation autour de l'axe Y (gauche/droite)
-// camPitch: rotation autour de l'axe X (haut/bas), clampé à ±89°
 static float camYaw    = 30.0f;
 static float camPitch  = 20.0f;
 static float camRadius =  3.0f;
 
 // ── Planisphère ───────────────────────────────────────────────────────────────
-// gMap gère l'état (centre, zoom) et expose les méthodes de dessin.
 static Planisphere gMap;
 
-// ── WayPoints (repères géographiques) ────────────────────────────────────────
-// Initialisés dans main() avant la boucle de rendu.
+// ── WayPoints ─────────────────────────────────────────────────────────────────
 static std::vector<WayPoint> gWaypoints;
 
 // ── Souris ────────────────────────────────────────────────────────────────────
 static bool  lmbDown    = false;
 static float lastMX     = 0.0f, lastMY = 0.0f;
-static bool  dragIn3D   = false;  // true → le drag courant a commencé dans le panneau 3D
-static bool  dragSplit  = false;  // true → le drag courant déplace le séparateur vertical
-static bool  dragMapTop = false;  // true → le drag courant déplace le séparateur horizontal
+static bool  dragIn3D   = false;
+static bool  dragSplit  = false;
+static bool  dragMapTop = false;
 
 // ── GLFW ──────────────────────────────────────────────────────────────────────
 static GLFWwindow* gWindow     = nullptr;
-static GLFWcursor* gCurResize  = nullptr;   // curseur ↔ (séparateur vertical)
-static GLFWcursor* gCurVResize = nullptr;   // curseur ↕ (séparateur horizontal)
-static GLFWcursor* gCurArrow   = nullptr;   // curseur flèche normal
+static GLFWcursor* gCurResize  = nullptr;
+static GLFWcursor* gCurVResize = nullptr;
+static GLFWcursor* gCurArrow   = nullptr;
+
+// =============================================================================
+// État de la simulation temporelle
+// =============================================================================
+//
+// simTime  : temps de simulation courant [s], ∈ [0, SIM_DURATION]
+// simSpeed : multiplicateur de vitesse (valeurs : 1, 2, 4, …, 16384)
+// simPaused: simulation en pause si true
+// wallPrev : dernier glfwGetTime() mesuré (pour le dt)
+static double simTime   = 0.0;
+static double simSpeed  = 64.0;   // ×64 par défaut (~14s par orbite LEO)
+static bool   simPaused = false;
+static double wallPrev  = 0.0;
 
 
 // =============================================================================
 // Helpers
 // =============================================================================
 
-// Position du séparateur vertical en pixels (calculée depuis la fraction)
-static float splitX_px() { return splitFrac * static_cast<float>(WIN_W); }
-
-// Position du séparateur horizontal (haut du planisphère) en pixels
+static float splitX_px()  { return splitFrac * static_cast<float>(WIN_W); }
 static float mapTopY_px() { return mapTopFrac * static_cast<float>(WIN_H); }
 
-// Retourne true si le curseur (x) est à moins de 6 px du séparateur vertical
 static bool nearSplit(double x) {
     return std::abs(static_cast<float>(x) - splitX_px()) < 6.0f;
 }
-
-// Retourne true si le curseur est dans le panneau planisphère (droite)
 static bool inMapPanel(double x) {
     return static_cast<float>(x) > splitX_px();
 }
-
-// Retourne true si le curseur est sur le séparateur horizontal du planisphère
-// (dans le panneau droit, à moins de 6 px du bord supérieur du planisphère)
 static bool nearMapTopSplit(double x, double y) {
     if (!inMapPanel(x)) return false;
     return std::abs(static_cast<float>(y) - mapTopY_px()) < 6.0f;
@@ -123,26 +116,17 @@ static bool nearMapTopSplit(double x, double y) {
 // Callbacks GLFW
 // =============================================================================
 
-// ── Redimensionnement ─────────────────────────────────────────────────────────
 static void framebuffer_size_callback(GLFWwindow*, int w, int h)
 {
     WIN_W = w;
     WIN_H = h;
-    // Après resize, re-clamper la latitude (le zoom_min peut avoir changé
-    // si la fenêtre est plus haute, mais en pratique WIN_H est fixé ici).
     gMap.clampLat();
 }
 
-// ── Bouton souris ─────────────────────────────────────────────────────────────
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 {
-    // Forward vers ImGui (input dans les fenêtres ImGui)
     ImGui_ImplGlfw_MouseButtonCallback(window, button, action, mods);
-
     if (button != GLFW_MOUSE_BUTTON_LEFT) return;
-
-    // Si ImGui capture la souris (clic sur un widget ImGui), on ne traite pas
-    // l'événement sauf si un drag de séparateur est déjà en cours.
     if (ImGui::GetIO().WantCaptureMouse && !dragSplit && !dragMapTop) return;
 
     if (action == GLFW_PRESS)
@@ -152,129 +136,116 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
         lmbDown = true;
 
         if (nearSplit(cx)) {
-            // ── Drag du séparateur vertical (3D / planisphère) ─────────────
-            dragSplit  = true;
-            dragMapTop = false;
-            dragIn3D   = false;
+            dragSplit = true; dragMapTop = false; dragIn3D = false;
             glfwSetCursor(window, gCurResize);
         } else if (nearMapTopSplit(cx, cy)) {
-            // ── Drag du séparateur horizontal (menu / planisphère) ──────────
-            dragMapTop = true;
-            dragSplit  = false;
-            dragIn3D   = false;
+            dragMapTop = true; dragSplit = false; dragIn3D = false;
             glfwSetCursor(window, gCurVResize);
         } else {
-            // ── Drag dans l'un des deux panneaux ───────────────────────────
-            dragSplit  = false;
-            dragMapTop = false;
-            dragIn3D   = !inMapPanel(cx);   // true si panneau 3D (gauche)
+            dragSplit = false; dragMapTop = false;
+            dragIn3D  = !inMapPanel(cx);
         }
     }
     else
     {
-        lmbDown    = false;
-        dragSplit  = false;
-        dragMapTop = false;
-        // Le curseur sera remis à jour au prochain mousemove
+        lmbDown = false; dragSplit = false; dragMapTop = false;
     }
 }
 
-// ── Mouvement de la souris ────────────────────────────────────────────────────
 static void cursor_pos_callback(GLFWwindow* window, double xpos, double ypos)
 {
     ImGui_ImplGlfw_CursorPosCallback(window, xpos, ypos);
     float dx = static_cast<float>(xpos) - lastMX;
     float dy = static_cast<float>(ypos) - lastMY;
 
-    if (dragSplit)
-    {
-        // ── Déplace le séparateur vertical ────────────────────────────────
+    if (dragSplit) {
         splitFrac = glm::clamp(static_cast<float>(xpos) / WIN_W, 0.15f, 0.85f);
-    }
-    else if (dragMapTop)
-    {
-        // ── Déplace le séparateur horizontal (haut du planisphère) ───────
-        // 0 = planisphère en haut (menu caché), 0.85 = planisphère tout en bas.
+    } else if (dragMapTop) {
         mapTopFrac = glm::clamp(static_cast<float>(ypos) / WIN_H, 0.0f, 0.85f);
-    }
-    else if (lmbDown)
-    {
-        if (dragIn3D)
-        {
-            // ── Rotation arcball ─────────────────────────────────────────
-            // Axe horizontal INVERSÉ : souris droite → yaw diminue
-            // (la sphère tourne dans le sens "naturel" comme si on la tirait)
+    } else if (lmbDown) {
+        if (dragIn3D) {
             camYaw   -= dx * 0.4f;
             camPitch  = glm::clamp(camPitch + dy * 0.4f, -89.0f, 89.0f);
-        }
-        else
-        {
-            // ── Pan du planisphère ────────────────────────────────────────
+        } else {
             float ppd = gMap.pixPerDeg(WIN_H);
-
-            // Souris vers la droite (dx > 0) → on avance vers la droite de
-            // la carte → les longitudes croissantes arrivent → ctrLon diminue
             gMap.ctrLon -= dx / ppd;
-
-            // Souris vers le bas (dy > 0) → en espace écran y↓, la carte
-            // descend → les latitudes décroissantes arrivent → ctrLat augmente
             gMap.ctrLat += dy / ppd;
-
-            // Applique le clamp lat (les pôles ne doivent pas entrer dans
-            // la fenêtre). ctrLon n'est pas clampé → loop horizontal libre.
             gMap.clampLat();
         }
-    }
-    else
-    {
-        // ── Mise à jour du curseur selon la position ───────────────────────
-        if (nearSplit(xpos))
-            glfwSetCursor(window, gCurResize);
-        else if (nearMapTopSplit(xpos, ypos))
-            glfwSetCursor(window, gCurVResize);
-        else
-            glfwSetCursor(window, gCurArrow);
+    } else {
+        if      (nearSplit(xpos))           glfwSetCursor(window, gCurResize);
+        else if (nearMapTopSplit(xpos,ypos)) glfwSetCursor(window, gCurVResize);
+        else                                glfwSetCursor(window, gCurArrow);
     }
 
     lastMX = static_cast<float>(xpos);
     lastMY = static_cast<float>(ypos);
 }
 
-// ── Molette ───────────────────────────────────────────────────────────────────
 static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 {
     ImGui_ImplGlfw_ScrollCallback(window, xoffset, yoffset);
-    if (ImGui::GetIO().WantCaptureMouse) return;   // ImGui consomme le scroll
+    if (ImGui::GetIO().WantCaptureMouse) return;
 
     double cx, cy;
     glfwGetCursorPos(window, &cx, &cy);
 
-    if (!inMapPanel(cx))
-    {
-        // ── Zoom caméra 3D ────────────────────────────────────────────────
-        // yoffset > 0 = scroll vers le haut = on s'approche
+    if (!inMapPanel(cx)) {
         camRadius = glm::clamp(camRadius - static_cast<float>(yoffset) * 0.25f,
                                1.2f, 10.0f);
-    }
-    else if (!nearSplit(cx))
-    {
-        // ── Zoom planisphère ──────────────────────────────────────────────
+    } else if (!nearSplit(cx)) {
         float factor = (yoffset > 0) ? 1.15f : (1.0f / 1.15f);
         gMap.zoom = glm::clamp(gMap.zoom * factor,
-                               Planisphere::ZOOM_MIN,
-                               Planisphere::ZOOM_MAX);
-        // Re-clamp lat après changement de zoom :
-        // le "latMax autorisé" dépend du zoom.
+                               Planisphere::ZOOM_MIN, Planisphere::ZOOM_MAX);
         gMap.clampLat();
     }
 }
 
 // ── Clavier ───────────────────────────────────────────────────────────────────
+//   ESC / Q  : quitter
+//   Espace   : pause / reprendre
+//   + / =    : vitesse ×2
+//   - / _    : vitesse ÷2
+//   R        : réinitialiser le temps
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
     ImGui_ImplGlfw_KeyCallback(window, key, scancode, action, mods);
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
+
+    if (action == GLFW_PRESS || action == GLFW_REPEAT)
+    {
+        switch (key)
+        {
+        case GLFW_KEY_ESCAPE:
+            glfwSetWindowShouldClose(window, true);
+            break;
+
+        case GLFW_KEY_SPACE:
+            if (action == GLFW_PRESS)
+                simPaused = !simPaused;
+            break;
+
+        // Accélérer (+ pavé num ou = / + azerty)
+        case GLFW_KEY_KP_ADD:
+        case GLFW_KEY_EQUAL:       // = ou + (sans shift sur azerty)
+            simSpeed = std::min(simSpeed * 2.0, 16384.0);
+            break;
+
+        // Ralentir (- pavé num ou - azerty)
+        case GLFW_KEY_KP_SUBTRACT:
+        case GLFW_KEY_MINUS:
+            simSpeed = std::max(simSpeed / 2.0, 1.0);
+            break;
+
+        // Réinitialiser le temps de simulation
+        case GLFW_KEY_R:
+            if (action == GLFW_PRESS)
+                simTime = 0.0;
+            break;
+
+        default:
+            break;
+        }
+    }
 }
 
 
@@ -282,86 +253,44 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 // Sources GLSL
 // =============================================================================
 
-// ── Shader 3D : éclairage Phong (sphère terrestre) ────────────────────────────
-//
-// Vertex shader : transforme les positions et calcule les normales en
-//   espace monde (pour l'éclairage).
-// Fragment shader : modèle de Phong simplifié avec lumière directionnelle
-//   (soleil) = rayons parallèles, pas d'atténuation.
-//
-// MODÈLE DE PHONG :
-//   Lumière = ambient + diffuse + specular
-//   ambient  = k_a · couleur                  (éclairage minimum, côté nuit)
-//   diffuse  = k_d · max(N·L, 0) · couleur    (dépend de l'angle N/lumière)
-//   specular = k_s · max(R·V, 0)^alpha        (brillance)
-//
 static const char* VERT3D = R"glsl(
 #version 330 core
-
-layout(location = 0) in vec3 aPos;     // Position locale du sommet
-layout(location = 1) in vec3 aNormal;  // Normale locale du sommet
-
-uniform mat4 uMVP;    // Model-View-Projection (transforme en clip-space)
-uniform mat4 uModel;  // Matrice modèle seule (transforme en espace monde)
-
-out vec3 vNormal;     // Normale en espace monde (pour le fragment shader)
-out vec3 vFragPos;    // Position en espace monde (pour le calcul specular)
-
+layout(location = 0) in vec3 aPos;
+layout(location = 1) in vec3 aNormal;
+uniform mat4 uMVP;
+uniform mat4 uModel;
+out vec3 vNormal;
+out vec3 vFragPos;
 void main()
 {
-    // Position en espace monde (pour les calculs d'éclairage)
     vFragPos = vec3(uModel * vec4(aPos, 1.0));
-
-    // Normale en espace monde.
-    // On utilise la transposée de l'inverse du modèle pour gérer
-    // correctement les normales en cas de mise à l'échelle non uniforme.
-    vNormal = mat3(transpose(inverse(uModel))) * aNormal;
-
-    // Position finale en clip-space (sortie obligatoire du vertex shader)
+    vNormal  = mat3(transpose(inverse(uModel))) * aNormal;
     gl_Position = uMVP * vec4(aPos, 1.0);
 }
 )glsl";
 
 static const char* FRAG3D = R"glsl(
 #version 330 core
-
-in  vec3 vNormal;    // Normale en espace monde
-in  vec3 vFragPos;   // Position en espace monde
-
-uniform vec3 uSunDir;  // Direction VERS le soleil (normalisée)
-uniform vec3 uColor;   // Couleur de la surface
-
+in  vec3 vNormal;
+in  vec3 vFragPos;
+uniform vec3 uSunDir;
+uniform vec3 uColor;
 out vec4 FragColor;
-
 void main()
 {
     vec3 N = normalize(vNormal);
     vec3 L = normalize(uSunDir);
-
-    // Composante diffuse : Lambert — max(N·L, 0)
-    // Vaut 0 sur le côté nuit, 1 face au soleil.
     float diff = max(dot(N, L), 0.0);
-
-    // Composante ambiante (lumière indirecte, côté nuit non complètement noir)
     vec3 ambient  = 0.07 * uColor;
-
-    // Composante diffuse
     vec3 diffuse  = diff * uColor;
-
-    // Composante spéculaire (brillance, modèle de Blinn-Phong)
-    // viewDir : direction vers la caméra depuis le fragment
-    // halfDir : bissectrice entre la lumière et la vue
     vec3 viewDir  = normalize(-vFragPos);
     vec3 halfDir  = normalize(L + viewDir);
     float spec    = pow(max(dot(N, halfDir), 0.0), 64.0);
     vec3 specular = 0.18 * vec3(1.0) * spec;
-
     FragColor = vec4(ambient + diffuse + specular, 1.0);
 }
 )glsl";
 
-// ── Shader 3D Flat : couleur uniforme sans éclairage ─────────────────────────
-// Utilisé pour les traits des pôles et l'hexagone 3D de Paris.
 static const char* VERT_FLAT3D = R"glsl(
 #version 330 core
 layout(location = 0) in vec3 aPos;
@@ -376,8 +305,6 @@ out vec4 FragColor;
 void main() { FragColor = uColor; }
 )glsl";
 
-// ── Shader 2D : couleur uniforme, espace pixel (planisphère, UI) ─────────────
-// La projection ortho (passée via uProj) mappe les pixels écran → NDC.
 static const char* VERT2D = R"glsl(
 #version 330 core
 layout(location = 0) in vec2 aPos;
@@ -402,13 +329,12 @@ static GLuint compile_shader(GLenum type, const char* src)
     GLuint id = glCreateShader(type);
     glShaderSource(id, 1, &src, nullptr);
     glCompileShader(id);
-
     GLint ok;
     glGetShaderiv(id, GL_COMPILE_STATUS, &ok);
     if (!ok) {
         char buf[512];
         glGetShaderInfoLog(id, 512, nullptr, buf);
-        std::cerr << "Erreur compilation shader : " << buf << "\n";
+        std::cerr << "Erreur shader : " << buf << "\n";
     }
     return id;
 }
@@ -434,42 +360,31 @@ static GLuint create_program(const char* vert, const char* frag)
 int main()
 {
     // ── Initialisation GLFW ───────────────────────────────────────────────────
-    if (!glfwInit()) {
-        std::cerr << "Échec glfwInit\n";
-        return -1;
-    }
+    if (!glfwInit()) { std::cerr << "Échec glfwInit\n"; return -1; }
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_SAMPLES, 4);   // multisampling anti-aliasing (4x)
+    glfwWindowHint(GLFW_SAMPLES, 4);
 
     gWindow = glfwCreateWindow(WIN_W, WIN_H, "OrbitalSim", nullptr, nullptr);
-    if (!gWindow) {
-        std::cerr << "Échec glfwCreateWindow\n";
-        glfwTerminate();
-        return -1;
-    }
+    if (!gWindow) { std::cerr << "Échec glfwCreateWindow\n"; glfwTerminate(); return -1; }
     glfwMakeContextCurrent(gWindow);
-    glfwSwapInterval(1);   // VSync : limite le rendu à la fréquence de l'écran
+    glfwSwapInterval(1);
 
-    // Curseurs personnalisés
-    gCurResize  = glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR);   // ↔ séparateur vertical
-    gCurVResize = glfwCreateStandardCursor(GLFW_VRESIZE_CURSOR);   // ↕ séparateur horizontal
+    gCurResize  = glfwCreateStandardCursor(GLFW_HRESIZE_CURSOR);
+    gCurVResize = glfwCreateStandardCursor(GLFW_VRESIZE_CURSOR);
     gCurArrow   = glfwCreateStandardCursor(GLFW_ARROW_CURSOR);
 
-    // ── Initialisation GLAD (charge les pointeurs de fonctions OpenGL) ────────
     if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
-        std::cerr << "Échec GLAD\n";
-        return -1;
+        std::cerr << "Échec GLAD\n"; return -1;
     }
 
-    // ── Initialisation Dear ImGui ─────────────────────────────────────────────
+    // ── Dear ImGui ────────────────────────────────────────────────────────────
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr;   // pas de fichier imgui.ini (état mémorisé en RAM)
+    io.IniFilename = nullptr;
 
-    // Thème sombre personnalisé : on part du thème dark standard et on l'ajuste.
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding    = 0.0f;
@@ -477,146 +392,132 @@ int main()
     style.GrabRounding      = 2.0f;
     style.Colors[ImGuiCol_Text] = ImVec4(0.88f, 0.92f, 0.98f, 1.0f);
 
-    // Chargement de la police système (Windows).
-    // Segoe UI supporte tous les caractères latins (accents français inclus).
-    // Si le fichier est absent, ImGui retombe sur sa police embarquée (ASCII seul).
     ImFont* font = io.Fonts->AddFontFromFileTTF(
         "C:\\Windows\\Fonts\\segoeui.ttf", 14.0f);
-    if (!font)
-        io.Fonts->AddFontDefault();
+    if (!font) io.Fonts->AddFontDefault();
 
-    // Backends GLFW + OpenGL 3.3 Core.
-    // install_callbacks = false : on gère les callbacks manuellement (chaining).
     ImGui_ImplGlfw_InitForOpenGL(gWindow, /*install_callbacks=*/false);
     ImGui_ImplOpenGL3_Init("#version 330");
 
-    // ── Enregistrement des callbacks ──────────────────────────────────────────
+    // ── Callbacks ─────────────────────────────────────────────────────────────
     glfwSetFramebufferSizeCallback(gWindow, framebuffer_size_callback);
     glfwSetMouseButtonCallback    (gWindow, mouse_button_callback);
     glfwSetCursorPosCallback      (gWindow, cursor_pos_callback);
     glfwSetScrollCallback         (gWindow, scroll_callback);
     glfwSetKeyCallback            (gWindow, key_callback);
 
-    // ── États OpenGL globaux ──────────────────────────────────────────────────
-    glEnable(GL_DEPTH_TEST);    // Test de profondeur (objets cachés derrière)
-    glEnable(GL_MULTISAMPLE);   // Active l'AA MSAA (requiert GLFW_SAMPLES > 0)
-    glEnable(GL_SCISSOR_TEST);  // Permet de restreindre le rendu à une zone
+    // ── États OpenGL ──────────────────────────────────────────────────────────
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_MULTISAMPLE);
+    glEnable(GL_SCISSOR_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // ── Compilation des programmes shaders ───────────────────────────────────
+    // ── Shaders ───────────────────────────────────────────────────────────────
     GLuint shader3D     = create_program(VERT3D,      FRAG3D);
     GLuint shaderFlat3D = create_program(VERT_FLAT3D, FRAG_FLAT3D);
     GLuint shader2D     = create_program(VERT2D,      FRAG2D);
 
-    // Uniforms du shader 3D Phong
-    GLint loc3D_MVP   = glGetUniformLocation(shader3D, "uMVP");
-    GLint loc3D_Model = glGetUniformLocation(shader3D, "uModel");
-    GLint loc3D_Sun   = glGetUniformLocation(shader3D, "uSunDir");
-    GLint loc3D_Color = glGetUniformLocation(shader3D, "uColor");
-
-    // Uniforms du shader Flat 3D (pôles, hexagone Paris)
+    GLint loc3D_MVP   = glGetUniformLocation(shader3D,     "uMVP");
+    GLint loc3D_Model = glGetUniformLocation(shader3D,     "uModel");
+    GLint loc3D_Sun   = glGetUniformLocation(shader3D,     "uSunDir");
+    GLint loc3D_Color = glGetUniformLocation(shader3D,     "uColor");
     GLint locF_MVP    = glGetUniformLocation(shaderFlat3D, "uMVP");
     GLint locF_Color  = glGetUniformLocation(shaderFlat3D, "uColor");
-
-    // Uniforms du shader 2D (planisphère)
-    GLint loc2D_Proj  = glGetUniformLocation(shader2D, "uProj");
-    GLint loc2D_Color = glGetUniformLocation(shader2D, "uColor");
+    GLint loc2D_Proj  = glGetUniformLocation(shader2D,     "uProj");
+    GLint loc2D_Color = glGetUniformLocation(shader2D,     "uColor");
 
     // ── Géométries ────────────────────────────────────────────────────────────
-    // Sphère UV (48 stacks × 64 slices = bon compromis qualité/perf)
-    SphereGPU sphere = build_sphere(1.0f, 48, 64);
-
-    // Buffers dynamiques
-    DynBuf2D dyn2 = make_dyn2d();  // pour le planisphère (2D)
-    DynBuf3D dyn3 = make_dyn3d();  // pour les marqueurs WayPoint 3D non éclairés
-
-    // Quadrillage 3D statique (uploadé une seule fois sur GPU)
-    // r = 1.005 : légèrement au-dessus de la sphère pour éviter le z-fighting
-    // 72 segments par arc → arcs lisses (~5° par sous-segment)
+    SphereGPU     sphere = build_sphere(1.0f, 48, 64);
+    DynBuf2D      dyn2   = make_dyn2d();
+    DynBuf3D      dyn3   = make_dyn3d();
     Graticule3DGPU grat3D = build_graticule3D(1.005f, 72);
 
-    // ── Direction du soleil ───────────────────────────────────────────────────
-    // Le soleil est une lumière directionnelle (rayons parallèles).
-    // La direction est fixe ici — elle pourra être animée plus tard (orbite).
-    // normalize() garantit un vecteur unitaire (requis pour le dot product).
     const glm::vec3 sunDir = glm::normalize(glm::vec3(1.6f, 0.8f, 0.7f));
 
     // ── WayPoints ─────────────────────────────────────────────────────────────
-    // Paris : hexagone or
-    gWaypoints.push_back({
-        "Paris",
-        48.85f, 2.35f,
-        { 1.0f, 0.85f, 0.2f, 1.0f },   // or
-        8.0f, 0.055f,
-        WPShape::Hexagon
-    });
+    gWaypoints.push_back({ "Paris",    48.85f,  2.35f, { 1.0f, 0.85f, 0.2f,  1.0f }, 8.0f,  0.055f, WPShape::Hexagon });
+    gWaypoints.push_back({ "Pole Nord", 90.0f,  0.0f,  { 1.0f, 0.22f, 0.18f, 1.0f }, 10.0f, 0.12f,  WPShape::Cross   });
+    gWaypoints.push_back({ "Pole Sud", -90.0f,  0.0f,  { 0.22f,0.55f, 1.0f,  1.0f }, 10.0f, 0.12f,  WPShape::Cross   });
 
-    // Pôle Nord : croix rouge (lat=90°, lon=0° — lon arbitraire aux pôles)
-    gWaypoints.push_back({
-        "Pole Nord",
-        90.0f, 0.0f,
-        { 1.0f, 0.22f, 0.18f, 1.0f },  // rouge
-        10.0f, 0.12f,
-        WPShape::Cross
-    });
-
-    // Pôle Sud : croix bleue
-    gWaypoints.push_back({
-        "Pole Sud",
-        -90.0f, 0.0f,
-        { 0.22f, 0.55f, 1.0f, 1.0f },  // bleu
-        10.0f, 0.12f,
-        WPShape::Cross
-    });
-
-    // Pré-calculer les marqueurs 3D (géométrie fixe, calculée une seule fois)
     std::vector<std::vector<float>> waypointMesh3D;
     for (const auto& wp : gWaypoints)
         waypointMesh3D.push_back(wp.markerSphere());
 
-    // ── Boucle de rendu ───────────────────────────────────────────────────────
+    // ── Palette de couleurs satellites ────────────────────────────────────────
+    static const glm::vec4 kPalette[] = {
+        { 1.0f, 0.85f, 0.20f, 1.0f },
+        { 0.20f, 1.0f, 0.55f, 1.0f },
+        { 0.35f, 0.70f, 1.0f, 1.0f },
+        { 1.0f, 0.45f, 0.10f, 1.0f },
+        { 0.80f, 0.25f, 1.0f, 1.0f },
+        { 1.0f, 0.30f, 0.45f, 1.0f },
+    };
+
+    // ── Initialise le timer de simulation ─────────────────────────────────────
+    wallPrev = glfwGetTime();
+
+    // ── Helper : croix 3D 6 sommets ──────────────────────────────────────────
+    auto makeCross3 = [](glm::vec3 p, float r) -> std::vector<float> {
+        return {
+            p.x-r, p.y,   p.z,    p.x+r, p.y,   p.z,
+            p.x,   p.y-r, p.z,    p.x,   p.y+r, p.z,
+            p.x,   p.y,   p.z-r,  p.x,   p.y,   p.z+r,
+        };
+    };
+
+
+    // =========================================================================
+    // Boucle de rendu
+    // =========================================================================
     while (!glfwWindowShouldClose(gWindow))
     {
-        glfwPollEvents();   // Traite les événements GLFW (clavier, souris…)
+        glfwPollEvents();
 
-        // ── Nouvelle frame ImGui ───────────────────────────────────────────────
+        // ── Avancer le temps de simulation ───────────────────────────────────
+        {
+            double wallNow = glfwGetTime();
+            double wallDt  = wallNow - wallPrev;
+            wallPrev       = wallNow;
+            // Clamp du dt pour éviter les sauts après lag / focus perdu
+            wallDt = std::min(wallDt, 0.1);
+
+            if (!simPaused)
+                simTime = std::fmod(simTime + wallDt * simSpeed, SIM_DURATION);
+        }
+
+        // ── Nouvelle frame ImGui ──────────────────────────────────────────────
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Dimensions actuelles du framebuffer
         int fbW, fbH;
         glfwGetFramebufferSize(gWindow, &fbW, &fbH);
 
-        // Position du séparateur horizontal (haut du planisphère) en pixels entiers
         int mapTopY = static_cast<int>(mapTopFrac * fbH);
-
-        // Synchronise le panelTop du planisphère pour les calculs de projection
         gMap.panelTop = mapTopY;
-
-        // Position du séparateur en pixels entiers
-        int splitX = static_cast<int>(splitFrac * fbW);
+        int splitX    = static_cast<int>(splitFrac * fbW);
 
         // ── Clear global ──────────────────────────────────────────────────────
-        // Le scissor couvre toute la fenêtre pour le clear initial.
         glScissor(0, 0, fbW, fbH);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // ══════════════════════════════════════════════════════════════════════
+        // =====================================================================
         // PANNEAU GAUCHE — Vue 3D
-        // ══════════════════════════════════════════════════════════════════════
-        // On restreint le viewport ET le scissor au panneau gauche.
-        // glViewport : où OpenGL projette le clip-space (NDC → pixels)
-        // glScissor  : zone où glClear et les draw calls peuvent écrire
+        // =====================================================================
+        //
+        // La hauteur utile exclut la barre de temps (BAR_H pixels en bas).
+        const float BAR_H = 54.0f;
+
         glViewport(0, 0, splitX, fbH);
         glScissor (0, 0, splitX, fbH);
         glEnable(GL_DEPTH_TEST);
 
-        glClearColor(0.04f, 0.05f, 0.10f, 1.0f);  // fond bleu nuit (espace)
+        glClearColor(0.04f, 0.05f, 0.10f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // ── Matrices 3D ───────────────────────────────────────────────────────
-        // Caméra arcball : la caméra orbite autour de l'origine.
         float yRad = glm::radians(camYaw);
         float pRad = glm::radians(camPitch);
         glm::vec3 camPos = {
@@ -627,205 +528,363 @@ int main()
 
         float     aspect3D = static_cast<float>(splitX) / static_cast<float>(fbH);
         glm::mat4 proj3D   = glm::perspective(glm::radians(45.0f), aspect3D, 0.1f, 100.0f);
-        glm::mat4 view3D   = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0, 1, 0));
-        glm::mat4 model3D  = glm::mat4(1.0f);   // identité : sphère centrée à l'origine
-        glm::mat4 mvp3D    = proj3D * view3D * model3D;
+        glm::mat4 view3D   = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0,1,0));
 
-        // ── Sphère terrestre (shader Phong) ───────────────────────────────────
+        // ── Matrice de rotation de la Terre ───────────────────────────────────
+        //   ω_E × simTime [rad] — autour de Y (pôle Nord)
+        const float earthAngle = static_cast<float>(simTime * OMEGA_EARTH);
+        glm::mat4 modelEarth   = glm::rotate(glm::mat4(1.0f),
+                                              earthAngle,
+                                              glm::vec3(0.0f, 1.0f, 0.0f));
+
+        // MVP pour les éléments ECEF (sphère, graticule, WayPoints) → tournent
+        glm::mat4 mvpEarth = proj3D * view3D * modelEarth;
+        // MVP pour les éléments ECI (orbites, trajectoires) → fixes dans l'espace
+        glm::mat4 mvpECI   = proj3D * view3D;   // model = identité
+
+        // ── Sphère terrestre (shader Phong, ECEF) ────────────────────────────
         glUseProgram(shader3D);
-        glUniformMatrix4fv(loc3D_MVP,   1, GL_FALSE, glm::value_ptr(mvp3D));
-        glUniformMatrix4fv(loc3D_Model, 1, GL_FALSE, glm::value_ptr(model3D));
+        glUniformMatrix4fv(loc3D_MVP,   1, GL_FALSE, glm::value_ptr(mvpEarth));
+        glUniformMatrix4fv(loc3D_Model, 1, GL_FALSE, glm::value_ptr(modelEarth));
         glUniform3fv(loc3D_Sun,   1, glm::value_ptr(sunDir));
-        glUniform3f (loc3D_Color, 0.14f, 0.40f, 0.80f);  // bleu Terre
+        glUniform3f (loc3D_Color, 0.14f, 0.40f, 0.80f);
 
         glBindVertexArray(sphere.vao);
         glDrawElements(GL_TRIANGLES, sphere.count, GL_UNSIGNED_INT, nullptr);
         glBindVertexArray(0);
 
-        // ── Éléments 3D non éclairés (shader Flat) ────────────────────────────
-        // Dessinés APRÈS la sphère pour apparaître au-dessus d'elle.
+        // ── Éléments ECEF (quadrillage + WayPoints) — tournent avec la Terre ──
         glUseProgram(shaderFlat3D);
-        glUniformMatrix4fv(locF_MVP, 1, GL_FALSE, glm::value_ptr(mvp3D));
+        glUniformMatrix4fv(locF_MVP, 1, GL_FALSE, glm::value_ptr(mvpEarth));
 
-        // Quadrillage 3D : 3 niveaux (fin / principal / surbrillance)
-        // L'équateur et le méridien de Greenwich sont inclus dans la surbrillance.
         draw_graticule3D(grat3D, locF_Color);
 
-        // Marqueurs WayPoint (Paris = hexagone, pôles = croix)
         for (int i = 0; i < static_cast<int>(gWaypoints.size()); ++i)
             draw_3d(dyn3, waypointMesh3D[i], gWaypoints[i].glMode(),
                     locF_Color, gWaypoints[i].color);
 
-        // ── Satellites : orbites + marqueurs Ap/Pe/AN/DN (style KSP) ─────────
-        // Génère une croix 3D centrée en `p` de demi-longueur `r` (6 sommets).
-        auto makeCross3 = [](glm::vec3 p, float r) -> std::vector<float> {
-            return {
-                p.x - r, p.y,     p.z,      p.x + r, p.y,     p.z,
-                p.x,     p.y - r, p.z,      p.x,     p.y + r, p.z,
-                p.x,     p.y,     p.z - r,  p.x,     p.y,     p.z + r,
-            };
-        };
+        // ── Éléments ECI (orbites + trajectoires propagées) — fixes ──────────
+        glUniformMatrix4fv(locF_MVP, 1, GL_FALSE, glm::value_ptr(mvpECI));
 
         for (const auto& sat : gSatellites)
         {
-            // -- Ellipse orbitale (GL_LINE_LOOP, couleur du satellite) ----------
-            draw_3d(dyn3, sat.orbitVerts, GL_LINE_LOOP, locF_Color, sat.color);
+            // Ellipse képlérienne (grise, tirets)
+            draw_3d(dyn3, sat.orbitVerts, GL_LINE_LOOP, locF_Color,
+                    { sat.color.r, sat.color.g, sat.color.b, 0.30f });
 
-            // -- Ligne des nœuds (AN → DN, vert atténué) ----------------------
+            // Ligne des nœuds
             std::vector<float> nodeLine = {
                 sat.anECI.x, sat.anECI.y, sat.anECI.z,
                 sat.dnECI.x, sat.dnECI.y, sat.dnECI.z,
             };
             draw_3d(dyn3, nodeLine, GL_LINES, locF_Color,
-                    { 0.15f, 0.90f, 0.35f, 0.55f });
+                    { 0.15f, 0.90f, 0.35f, 0.40f });
 
-            // -- Apogée (bleu ciel) -------------------------------------------
-            draw_3d(dyn3, makeCross3(sat.apECI, 0.035f), GL_LINES, locF_Color,
-                    { 0.35f, 0.72f, 1.0f, 1.0f });
+            // Apogée / Périgée / nœuds
+            draw_3d(dyn3, makeCross3(sat.apECI, 0.030f), GL_LINES, locF_Color,
+                    { 0.35f, 0.72f, 1.0f, 0.80f });
+            draw_3d(dyn3, makeCross3(sat.peECI, 0.030f), GL_LINES, locF_Color,
+                    { 1.0f, 0.55f, 0.15f, 0.80f });
+            draw_3d(dyn3, makeCross3(sat.anECI, 0.025f), GL_LINES, locF_Color,
+                    { 0.15f, 1.0f, 0.40f, 0.70f });
+            draw_3d(dyn3, makeCross3(sat.dnECI, 0.025f), GL_LINES, locF_Color,
+                    { 1.0f, 0.28f, 0.28f, 0.70f });
 
-            // -- Périgée (orange chaud) ----------------------------------------
-            draw_3d(dyn3, makeCross3(sat.peECI, 0.035f), GL_LINES, locF_Color,
-                    { 1.0f, 0.55f, 0.15f, 1.0f });
+            // ── Trajectoire J2 complète (3 jours) ──────────────────────────
+            // Rendu en dégradé : partie passée (plus sombre) / future (plus lumineuse)
+            if (!sat.trackVerts.empty())
+            {
+                // On divise la trajectoire en : passée (avant simTime) et future.
+                const int   nPts  = static_cast<int>(sat.track.size());
+                const double dtTrack = (nPts > 1) ? (sat.track[1].t - sat.track[0].t) : 30.0;
+                const int   iCur  = std::min(static_cast<int>(simTime / dtTrack), nPts - 1);
 
-            // -- Nœud ascendant (vert vif) ------------------------------------
-            draw_3d(dyn3, makeCross3(sat.anECI, 0.030f), GL_LINES, locF_Color,
-                    { 0.15f, 1.0f, 0.40f, 1.0f });
+                // Segment passé (depuis le début jusqu'à la position courante)
+                if (iCur > 0)
+                {
+                    std::vector<float> past(sat.trackVerts.begin(),
+                                            sat.trackVerts.begin() + (iCur + 1) * 3);
+                    draw_3d(dyn3, past, GL_LINE_STRIP, locF_Color,
+                            { sat.color.r * 0.45f, sat.color.g * 0.45f,
+                              sat.color.b * 0.45f, 0.55f });
+                }
 
-            // -- Nœud descendant (rouge-brique) --------------------------------
-            draw_3d(dyn3, makeCross3(sat.dnECI, 0.030f), GL_LINES, locF_Color,
-                    { 1.0f, 0.28f, 0.28f, 0.85f });
+                // Segment futur (de la position courante jusqu'à la fin)
+                if (iCur < nPts - 1)
+                {
+                    std::vector<float> future(sat.trackVerts.begin() + iCur * 3,
+                                              sat.trackVerts.end());
+                    draw_3d(dyn3, future, GL_LINE_STRIP, locF_Color,
+                            { sat.color.r, sat.color.g, sat.color.b, 0.70f });
+                }
+            }
 
-            // -- Position courante du satellite (couleur du satellite, plus grande)
-            draw_3d(dyn3, makeCross3(sat.posECI, 0.055f), GL_LINES, locF_Color,
+            // ── Position courante (grande croix brillante) ──────────────────
+            glm::vec3 curPos = sat.posAtTime(simTime);
+            draw_3d(dyn3, makeCross3(curPos, 0.060f), GL_LINES, locF_Color,
                     sat.color);
         }
 
-        // ── Projection ortho pleine fenêtre (partagée par menu et séparateurs) ──
-        // Coordonnées écran : x ∈ [0, fbW], y ∈ [0, fbH] (y=0 en haut)
+        // ── Projection ortho pleine fenêtre ───────────────────────────────────
         glm::mat4 proj2D_full = glm::ortho(0.0f, static_cast<float>(fbW),
                                             static_cast<float>(fbH), 0.0f,
                                             -1.0f, 1.0f);
+        glDisable(GL_DEPTH_TEST);
 
-        glDisable(GL_DEPTH_TEST);   // tout le reste est 2D
-
-        // ══════════════════════════════════════════════════════════════════════
-        // MENU — Zone en haut à droite, au-dessus du planisphère
-        // ══════════════════════════════════════════════════════════════════════
-        // Rendu en premier (en arrière-plan) : le planisphère le recouvrira
-        // si mapTopY < Menu::HEIGHT.
-        // Scissor OpenGL (y depuis le bas du framebuffer) :
-        //   zone menu en écran = [mapTopY .. 0] depuis le haut
-        //            en OpenGL = [fbH - mapTopY .. fbH]
+        // =====================================================================
+        // MENU
+        // =====================================================================
         if (mapTopY > 0)
         {
-            // Fond OpenGL (zone sombre derrière les boutons ImGui)
             glViewport(0, 0, fbW, fbH);
             glScissor(splitX, fbH - mapTopY, fbW - splitX, mapTopY);
             glUseProgram(shader2D);
             glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
             gMenu.draw(dyn2, loc2D_Color, splitX, fbW, fbH, mapTopY);
 
-            // Boutons ImGui (rendus à la fin de la frame, cf. ImGui::Render() plus bas).
-            // Retourne true quand l'utilisateur valide "Ajouter" dans le formulaire.
             if (gMenu.drawImGui(splitX, fbW, mapTopY))
             {
-                // Palette de couleurs pour différencier les satellites
-                static const glm::vec4 kPalette[] = {
-                    { 1.0f, 0.85f, 0.20f, 1.0f },   // or
-                    { 0.20f, 1.0f, 0.55f, 1.0f },   // vert menthe
-                    { 0.35f, 0.70f, 1.0f, 1.0f },   // bleu ciel
-                    { 1.0f, 0.45f, 0.10f, 1.0f },   // orange
-                    { 0.80f, 0.25f, 1.0f, 1.0f },   // violet
-                    { 1.0f, 0.30f, 0.45f, 1.0f },   // rose
-                };
                 Satellite sat;
                 sat.orbital  = gMenu.pendingOrbit;
                 sat.physical = gMenu.pendingPhysics;
                 sat.name     = "SAT-" + std::to_string(gSatellites.size() + 1);
                 sat.color    = kPalette[gSatellites.size() % 6];
                 sat.buildGeometry();
+                sat.propagate();   // ← calcul RK4+J2 sur 3 jours
                 gSatellites.push_back(std::move(sat));
             }
         }
 
-        // ══════════════════════════════════════════════════════════════════════
+        // =====================================================================
         // PANNEAU DROIT — Planisphère
-        // ══════════════════════════════════════════════════════════════════════
-        // Le panneau planisphère occupe la zone [splitX, mapTopY] → [fbW, fbH]
-        // en coordonnées écran (y depuis le haut).
-        // En OpenGL (y depuis le bas) : viewport y ∈ [0, fbH - mapTopY].
+        // =====================================================================
         {
-            int panelH = fbH - mapTopY;   // hauteur du panneau planisphère
+            int panelH = fbH - mapTopY;
             glViewport(splitX, 0, fbW - splitX, panelH);
             glScissor (splitX, 0, fbW - splitX, panelH);
 
-            // Projection ortho calée sur le panneau planisphère :
-            //   x : [splitX, fbW]       → NDC [−1, +1]
-            //   y : [mapTopY, fbH]      → NDC [+1, −1]  (y écran croît vers le bas)
-            // Avec ce mapping, project() retourne des coords pixels absolus dans
-            // [splitX..fbW] × [mapTopY..fbH] et ils se projettent correctement.
             glm::mat4 proj2D_panel = glm::ortho(
-                static_cast<float>(splitX),
-                static_cast<float>(fbW),
-                static_cast<float>(fbH),        // bottom (screen y max → NDC −1)
-                static_cast<float>(mapTopY),    // top    (screen y min → NDC +1)
+                static_cast<float>(splitX), static_cast<float>(fbW),
+                static_cast<float>(fbH),    static_cast<float>(mapTopY),
                 -1.0f, 1.0f);
 
             glUseProgram(shader2D);
             glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_panel));
 
-            // Fond, graticule, marqueurs (via la classe Planisphere)
             gMap.drawBackground(dyn2, loc2D_Color, splitX, fbW, fbH);
             gMap.drawGraticule (dyn2, loc2D_Color, splitX, fbW, fbH);
+
+            // ── Ground tracks des satellites ──────────────────────────────────
+            //
+            // Pour chaque point de la trajectoire, on calcule la lat/lon ECEF
+            // (corrigée de la rotation terrestre) et on projette sur la carte.
+            // On coupe le segment à chaque franchissement de l'antiméridien
+            // (saut de lon > 180°).
+            for (const auto& sat : gSatellites)
+            {
+                if (sat.track.empty()) continue;
+
+                const int   nPts     = static_cast<int>(sat.track.size());
+                const double dtTrack = (nPts > 1) ? (sat.track[1].t - sat.track[0].t) : 30.0;
+                const int   iCur     = std::min(static_cast<int>(simTime / dtTrack), nPts - 1);
+
+                // Sous-échantillonnage (1 point sur 2 → ~4320 points, léger)
+                const int stride = 2;
+
+                // Lambda : dessine un segment de ground track
+                auto flushSeg = [&](std::vector<float>& seg, glm::vec4 col) {
+                    if (seg.size() >= 4)
+                        draw_2d(dyn2, seg, GL_LINE_STRIP, loc2D_Color, col);
+                    seg.clear();
+                };
+
+                // ── Trajectoire passée (plus sombre) ────────────────────────
+                {
+                    std::vector<float> seg;
+                    float prevLon = -9999.0f;
+                    glm::vec4 colPast = { sat.color.r * 0.55f, sat.color.g * 0.55f,
+                                         sat.color.b * 0.55f, 0.65f };
+                    for (int i = 0; i <= iCur; i += stride)
+                    {
+                        float lat, lon;
+                        sat.latLonAtTime(sat.track[i].t, lat, lon);
+                        if (prevLon > -9000.0f && std::abs(lon - prevLon) > 150.0f)
+                            flushSeg(seg, colPast);
+                        glm::vec2 px = gMap.project(lon, lat, splitX, fbW, fbH);
+                        seg.push_back(px.x); seg.push_back(px.y);
+                        prevLon = lon;
+                    }
+                    flushSeg(seg, colPast);
+                }
+
+                // ── Trajectoire future (plus lumineuse) ──────────────────────
+                {
+                    std::vector<float> seg;
+                    float prevLon = -9999.0f;
+                    glm::vec4 colFut = { sat.color.r, sat.color.g, sat.color.b, 0.80f };
+                    for (int i = iCur; i < nPts; i += stride)
+                    {
+                        float lat, lon;
+                        sat.latLonAtTime(sat.track[i].t, lat, lon);
+                        if (prevLon > -9000.0f && std::abs(lon - prevLon) > 150.0f)
+                            flushSeg(seg, colFut);
+                        glm::vec2 px = gMap.project(lon, lat, splitX, fbW, fbH);
+                        seg.push_back(px.x); seg.push_back(px.y);
+                        prevLon = lon;
+                    }
+                    flushSeg(seg, colFut);
+                }
+
+                // ── Position courante sur le planisphère (croix) ─────────────
+                {
+                    float lat, lon;
+                    sat.latLonAtTime(simTime, lat, lon);
+                    glm::vec2 c  = gMap.project(lon, lat, splitX, fbW, fbH);
+                    const float r = 7.0f;
+                    std::vector<float> cross = {
+                        c.x - r, c.y,     c.x + r, c.y,
+                        c.x,     c.y - r, c.x,     c.y + r
+                    };
+                    glLineWidth(2.0f);
+                    draw_2d(dyn2, cross, GL_LINES, loc2D_Color, sat.color);
+                    glLineWidth(1.0f);
+                }
+            }
+
+            // WayPoints géographiques
             for (const auto& wp : gWaypoints)
                 gMap.drawWaypoint(dyn2, loc2D_Color, splitX, fbW, fbH, wp);
         }
 
-        // ══════════════════════════════════════════════════════════════════════
+        // =====================================================================
         // SÉPARATEURS + POIGNÉES
-        // ══════════════════════════════════════════════════════════════════════
-        // On repasse au viewport/scissor global pour dessiner par-dessus tout.
+        // =====================================================================
         glViewport(0, 0, fbW, fbH);
         glScissor (0, 0, fbW, fbH);
         glUseProgram(shader2D);
         glUniformMatrix4fv(loc2D_Proj, 1, GL_FALSE, glm::value_ptr(proj2D_full));
-
         {
             float sx  = static_cast<float>(splitX);
             float mty = static_cast<float>(mapTopY);
             float fw  = static_cast<float>(fbW);
             float fh  = static_cast<float>(fbH);
 
-            // ── Séparateur VERTICAL (3D / planisphère) ─────────────────────
-            // Barre fine 2 px, sur toute la hauteur
             draw_2d(dyn2, make_rect(sx - 1.0f, 0.0f, sx + 1.0f, fh),
                     GL_TRIANGLES, loc2D_Color, { 0.50f, 0.72f, 1.0f, 1.0f });
-            // Poignée (8 × 40 px, centrée sur la hauteur de la fenêtre)
             float midV = fh * 0.5f;
             draw_2d(dyn2, make_rect(sx - 4.0f, midV - 20.0f, sx + 4.0f, midV + 20.0f),
                     GL_TRIANGLES, loc2D_Color, { 0.70f, 0.85f, 1.0f, 1.0f });
 
-            // ── Séparateur HORIZONTAL (menu / planisphère, panneau droit) ──
-            if (mapTopY > 0)
-            {
-                // Barre fine 2 px, sur toute la largeur du panneau droit
+            if (mapTopY > 0) {
                 draw_2d(dyn2, make_rect(sx, mty - 1.0f, fw, mty + 1.0f),
                         GL_TRIANGLES, loc2D_Color, { 0.50f, 0.72f, 1.0f, 1.0f });
-                // Poignée (40 × 8 px, centrée horizontalement dans le panneau droit)
                 float midH = sx + (fw - sx) * 0.5f;
                 draw_2d(dyn2, make_rect(midH - 20.0f, mty - 4.0f, midH + 20.0f, mty + 4.0f),
                         GL_TRIANGLES, loc2D_Color, { 0.70f, 0.85f, 1.0f, 1.0f });
             }
         }
 
-        // ── Rendu ImGui (toujours en dernier, par-dessus tout le reste) ──────
-        // Remet le viewport complet avant de laisser ImGui dessiner.
+        // =====================================================================
+        // BARRE DE SIMULATION (bas du panneau 3D)
+        // =====================================================================
+        //
+        // Fenêtre ImGui collée en bas du panneau 3D.
+        // Contient : ▶/⏸ + slider + T+JJ HH:MM:SS + boutons -/+ vitesse
+        // Touches : Espace = pause, +/- = vitesse, R = reset
+        {
+            ImGui::SetNextWindowPos (ImVec2(0.0f, static_cast<float>(fbH) - BAR_H),
+                                     ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(static_cast<float>(splitX), BAR_H),
+                                     ImGuiCond_Always);
+
+            ImGui::PushStyleColor(ImGuiCol_WindowBg,    ImVec4(0.04f, 0.06f, 0.12f, 0.92f));
+            ImGui::PushStyleColor(ImGuiCol_Border,      ImVec4(0.25f, 0.45f, 0.70f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBg,     ImVec4(0.10f, 0.18f, 0.32f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.15f, 0.28f, 0.48f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_SliderGrab,  ImVec4(0.40f, 0.70f, 1.00f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(0.55f, 0.85f, 1.00f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button,       ImVec4(0.12f, 0.22f, 0.38f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,ImVec4(0.20f, 0.38f, 0.62f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.30f, 0.55f, 0.90f, 1.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,    ImVec2(8.0f, 5.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,      ImVec2(5.0f, 4.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize,      10.0f);
+
+            const ImGuiWindowFlags kBarFlags =
+                ImGuiWindowFlags_NoTitleBar      |
+                ImGuiWindowFlags_NoResize        |
+                ImGuiWindowFlags_NoMove          |
+                ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoScrollbar;
+
+            if (ImGui::Begin("##timeline", nullptr, kBarFlags))
+            {
+                // ── Ligne 1 : bouton ▶/⏸  +  slider de temps ────────────────
+                const char* playLbl = simPaused ? " \xe2\x96\xb6 " : "\xe2\x8f\xb8\xe2\x8f\xb8";  // ▶ / ⏸⏸ UTF-8
+                if (ImGui::Button(playLbl, ImVec2(32.0f, 20.0f)))
+                    simPaused = !simPaused;
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Espace");
+
+                ImGui::SameLine(0.0f, 6.0f);
+
+                float t_f   = static_cast<float>(simTime);
+                float dur_f = static_cast<float>(SIM_DURATION);
+                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+                if (ImGui::SliderFloat("##simslider", &t_f, 0.0f, dur_f, ""))
+                    simTime = static_cast<double>(t_f);
+                // Si l'utilisateur tire le slider, la valeur est déjà appliquée.
+                if (ImGui::IsItemActive())
+                    simTime = static_cast<double>(t_f);
+
+                // ── Ligne 2 : T+ JJ HH:MM:SS  |  vitesse  |  - x +  |  hint ──
+                const int total_s = static_cast<int>(simTime);
+                const int days    = total_s / 86400;
+                const int hh      = (total_s % 86400) / 3600;
+                const int mm      = (total_s % 3600)  / 60;
+                const int ss      = total_s % 60;
+                char tbuf[40];
+                std::snprintf(tbuf, sizeof(tbuf), "J+%d  %02d:%02d:%02d", days, hh, mm, ss);
+                ImGui::TextColored(ImVec4(0.50f, 0.88f, 1.0f, 1.0f), "%s", tbuf);
+
+                ImGui::SameLine(0.0f, 18.0f);
+
+                // Bouton réduire vitesse
+                if (ImGui::Button("- ##spd", ImVec2(22.0f, 18.0f)))
+                    simSpeed = std::max(simSpeed / 2.0, 1.0);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Réduire vitesse (-)");
+
+                ImGui::SameLine(0.0f, 4.0f);
+                char sbuf[20];
+                // Affiche "×N" avec N formaté proprement
+                if (simSpeed < 1000.0)
+                    std::snprintf(sbuf, sizeof(sbuf), "\xc3\x97%.0f   ", simSpeed);
+                else
+                    std::snprintf(sbuf, sizeof(sbuf), "\xc3\x97%.0fk  ", simSpeed / 1000.0);
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.20f, 1.0f), "%s", sbuf);
+
+                ImGui::SameLine(0.0f, 4.0f);
+                // Bouton augmenter vitesse
+                if (ImGui::Button("+ ##spd", ImVec2(22.0f, 18.0f)))
+                    simSpeed = std::min(simSpeed * 2.0, 16384.0);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Augmenter vitesse (+)");
+
+                ImGui::SameLine(0.0f, 16.0f);
+                ImGui::TextDisabled("[Espace] [+/-] [R=reset]");
+            }
+            ImGui::End();
+
+            ImGui::PopStyleVar  (4);
+            ImGui::PopStyleColor(9);
+        }
+
+        // ── Rendu ImGui ───────────────────────────────────────────────────────
         glViewport(0, 0, fbW, fbH);
         glScissor (0, 0, fbW, fbH);
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-        // Échange les buffers front/back (double buffering)
         glfwSwapBuffers(gWindow);
     }
 

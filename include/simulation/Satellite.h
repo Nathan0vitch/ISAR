@@ -5,16 +5,22 @@
 // Trois structures :
 //   OrbitalParams  — éléments képlériens (saisis + calculés)
 //   PhysicalParams — propriétés physiques du satellite
-//   Satellite      — combine les deux + géométrie GPU (orbite, marqueurs)
+//   TrackPoint     — point de la trajectoire propagée (ECI Y-up, normalisé)
+//   Satellite      — combine les deux + géométrie GPU (orbite, trajectoire J2)
 // =============================================================================
 
 #include <glm/glm.hpp>
 #include <vector>
 #include <string>
+#include <cmath>
 
-// Constantes physiques
-static constexpr double MU_EARTH_SI = 3.986004418e14;  // m³/s²  (param. gravitationnel Terre)
-static constexpr double R_EARTH_KM  = 6371.0;           // km     (rayon moyen Terre)
+// ── Constantes physiques ──────────────────────────────────────────────────────
+static constexpr double MU_EARTH_SI  = 3.986004418e14;  // m³/s²  (param. grav. Terre)
+static constexpr double MU_EARTH_KM3 = 3.986004418e5;   // km³/s²
+static constexpr double R_EARTH_KM   = 6371.0;           // km     (rayon moyen)
+static constexpr double OMEGA_EARTH  = 7.2921150e-5;     // rad/s  (rotation terrestre)
+static constexpr double J2_EARTH     = 1.08263e-3;       // coefficient J2 (aplatissement)
+static constexpr double SIM_DURATION = 3.0 * 86400.0;   // 3 jours [s]
 
 
 // =============================================================================
@@ -36,7 +42,6 @@ struct OrbitalParams
     float period_s        = 0.0f;   // Période orbitale (T)[s]
 
     // Met à jour a, e, T depuis h_perigee et h_apogee.
-    // À appeler dès que l'un des deux altitudes change.
     void recalculate();
 };
 
@@ -55,36 +60,65 @@ struct PhysicalParams
 
 
 // =============================================================================
+// TrackPoint — un point de la trajectoire propagée
+// =============================================================================
+//
+// Stocké dans notre référentiel ECI Y-up (pôle Nord = +Y),
+// normalisé par R_Earth (rayon sphère = 1 dans le moteur 3D).
+//
+// t     : temps écoulé depuis l'epoch [s]
+// x,y,z : position ECI Y-up / R_Earth
+struct TrackPoint
+{
+    double t;
+    double x, y, z;
+};
+
+
+// =============================================================================
 // Satellite — Données complètes + géométrie 3D
 // =============================================================================
 struct Satellite
 {
     std::string    name  = "SAT-1";
-    glm::vec4      color = { 1.0f, 0.85f, 0.20f, 1.0f };   // or
+    glm::vec4      color = { 1.0f, 0.85f, 0.20f, 1.0f };
 
     OrbitalParams  orbital;
     PhysicalParams physical;
 
-    // ── Géométrie 3D (unités scène : rayon sphère = 1 = R_Earth) ─────────────
-    // Mise à jour par buildGeometry().
-    std::vector<float> orbitVerts;   // GL_LINE_LOOP — triplets xyz, N_ORBIT points
-    glm::vec3 posECI = {};   // Position à l'anomalie vraie ν
-    glm::vec3 apECI  = {};   // Point apogée (θ = 180°)
-    glm::vec3 peECI  = {};   // Point périgée (θ = 0°)
-    glm::vec3 anECI  = {};   // Nœud ascendant (argument lat. = 0°)
-    glm::vec3 dnECI  = {};   // Nœud descendant (argument lat. = 180°)
+    // ── Géométrie de l'ellipse (statique, au t=0) ────────────────────────────
+    std::vector<float> orbitVerts;   // GL_LINE_LOOP — triplets xyz ECI Y-up
+    glm::vec3 posECI = {};           // Position à ν (t=0)
+    glm::vec3 apECI  = {};           // Apogée
+    glm::vec3 peECI  = {};           // Périgée
+    glm::vec3 anECI  = {};           // Nœud ascendant
+    glm::vec3 dnECI  = {};           // Nœud descendant
 
-    // Reconstruit toute la géométrie 3D depuis orbital.
-    // Appelle orbital.recalculate() en interne.
+    // ── Trajectoire propagée sur SIM_DURATION avec J2 ────────────────────────
+    // Propagée par propagate(), rechargeable à tout moment.
+    std::vector<TrackPoint> track;      // positions ECI Y-up / R_Earth + temps
+    std::vector<float>      trackVerts; // xyz triplets pour GPU (GL_LINE_STRIP)
+
+    // ── API ───────────────────────────────────────────────────────────────────
+
+    // Construit l'ellipse statique (orbitVerts, apECI, peECI, anECI, dnECI, posECI).
     void buildGeometry();
 
+    // Propage l'orbite sur `duration_s` secondes depuis t=0 avec un pas RK4 de
+    // `dt_s` secondes, en tenant compte de la perturbation J2.
+    // Remplit track[] et trackVerts[].
+    void propagate(double duration_s = SIM_DURATION, double dt_s = 30.0);
+
+    // Retourne la position ECI Y-up normalisée au temps t_s [s] par
+    // interpolation linéaire dans track[].
+    // Retourne posECI si track est vide.
+    glm::vec3 posAtTime(double t_s) const;
+
+    // Retourne la latitude géocentrique [°] et la longitude ECEF [°] du
+    // satellite au temps t_s, en corrigeant la rotation terrestre.
+    void latLonAtTime(double t_s, float& lat_deg, float& lon_deg) const;
+
 private:
-    // Convertit un point du plan orbital (r [km], θ [°]) en coordonnées
-    // ECI (Y-up, normalisé par R_Earth) utilisées par le moteur 3D.
-    //
-    // Transformation appliquée :
-    //   1. Périfocal → ECI standard (Z-up) via matrice de rotation Ω, i, ω
-    //   2. ECI standard → notre ECI (Y-up) : (x, y_std, z_std) → (x, z_std, y_std)
-    //   3. Normalisation par R_Earth [km]
+    // Convertit un point périfocal (r [km], θ [°]) → ECI Y-up normalisé.
     glm::vec3 perifocalToECI(float r_km, float theta_deg) const;
 };
