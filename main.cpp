@@ -553,10 +553,12 @@ int main()
         glm::mat4 view3D   = glm::lookAt(camPos, glm::vec3(0.0f), glm::vec3(0,1,0));
 
         // ── Matrice de rotation de la Terre ───────────────────────────────────
-        //   ω_E × simTime [rad] — autour de Y (pôle Nord)
+        //   Dans notre ECI Y-up, l'est est vers +Z.
+        //   glm::rotate(+θ, Y) tourne +X vers −Z (règle main droite), soit vers
+        //   l'OUEST. Pour tourner vers l'est (prograde), on utilise −earthAngle.
         const float earthAngle = static_cast<float>(simTime * OMEGA_EARTH);
         glm::mat4 modelEarth   = glm::rotate(glm::mat4(1.0f),
-                                              earthAngle,
+                                              -earthAngle,
                                               glm::vec3(0.0f, 1.0f, 0.0f));
 
         // MVP pour les éléments ECEF (sphère, graticule, WayPoints) → tournent

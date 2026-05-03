@@ -184,11 +184,11 @@ bool Menu::drawSatelliteForm()
         ImGui::TableSetupColumn("val", ImGuiTableColumnFlags_WidthStretch, 0.42f);
 
         // -- Saisies (step=0 : champ texte pur, cliquer et taper la valeur) --
-        tableLabel("P\xc3\xa9rig\xc3\xa9\x65 h_p [km]");           // Périgée
-        ImGui::InputFloat("##hp",   &pendingOrbit.h_perigee,   0.f, 0.f, "%.1f");
+        tableLabel("Rayon p\xc3\xa9rig\xc3\xa9\x65 r_p [km]");     // Rayon périgée
+        ImGui::InputFloat("##rp",   &pendingOrbit.r_perigee,   0.f, 0.f, "%.1f");
 
-        tableLabel("Apog\xc3\xa9\x65 h_a [km]");                    // Apogée
-        ImGui::InputFloat("##ha",   &pendingOrbit.h_apogee,    0.f, 0.f, "%.1f");
+        tableLabel("Rayon apog\xc3\xa9\x65 r_a [km]");             // Rayon apogée
+        ImGui::InputFloat("##ra",   &pendingOrbit.r_apogee,    0.f, 0.f, "%.1f");
 
         tableLabel("Inclinaison i [\xc2\xb0]");                     // °
         ImGui::InputFloat("##inc",  &pendingOrbit.inclination, 0.f, 0.f, "%.2f");
@@ -253,9 +253,34 @@ bool Menu::drawSatelliteForm()
         ImGui::EndTable();
     }
 
-    // ── Boutons Annuler / Ajouter ─────────────────────────────────────────────
+    // ── Validation ────────────────────────────────────────────────────────────
     ImGui::Spacing();
     ImGui::Separator();
+    ImGui::Spacing();
+
+    // Contraintes :
+    //   1. Périgée et apogée au-dessus de la surface (r > R_Terre)
+    //   2. Apogée en-deçà de la sphère de Hill (~924 600 km)
+    const float R_E  = static_cast<float>(R_EARTH_KM);
+    const float R_H  = static_cast<float>(R_HILL_KM);
+    const float rp   = pendingOrbit.r_perigee;
+    const float ra   = pendingOrbit.r_apogee;
+
+    bool errUnder    = (rp <= R_E) || (ra <= R_E);
+    bool errEscape   = (rp > R_H) || (ra > R_H);
+    bool errInverted = (rp > ra);
+    bool canAdd      = !errUnder && !errEscape;
+
+    if (errUnder)
+        ImGui::TextColored(ImVec4(1.0f, 0.30f, 0.25f, 1.0f),
+            "\xe2\x9a\xa0 Rayon inf\xc3\xa9rieur au rayon terrestre (%.0f km)", R_E);
+    if (errEscape)
+        ImGui::TextColored(ImVec4(1.0f, 0.30f, 0.25f, 1.0f),
+            "\xe2\x9a\xa0 Apog\xc3\xa9\x65 d\xc3\xa9passe la sph\xc3\xa8re de Hill (~924 600 km)");
+    if (errInverted && !errUnder)
+        ImGui::TextColored(ImVec4(1.0f, 0.70f, 0.10f, 1.0f),
+            "\xe2\x9a\xa0 r_p > r_a : les rayons seront \xc3\xa9chang\xc3\xa9s");
+
     ImGui::Spacing();
 
     const float btnW = (ImGui::GetContentRegionAvail().x - 8.0f) * 0.5f;
@@ -269,6 +294,7 @@ bool Menu::drawSatelliteForm()
 
     ImGui::SameLine(0, 8.0f);
 
+    if (!canAdd) ImGui::BeginDisabled();
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.10f,0.30f,0.15f,1));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.15f,0.48f,0.24f,1));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.22f,0.70f,0.38f,1));
@@ -278,6 +304,7 @@ bool Menu::drawSatelliteForm()
         addClicked = true;
     }
     ImGui::PopStyleColor(3);
+    if (!canAdd) ImGui::EndDisabled();
 
     return addClicked;
 }

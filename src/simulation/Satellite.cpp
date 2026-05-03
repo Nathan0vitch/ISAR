@@ -36,12 +36,10 @@ static constexpr int    N_ORBIT   = 360;   // points sur l'ellipse statique
 // =============================================================================
 void OrbitalParams::recalculate()
 {
-    // On n'échange PAS h_perigee et h_apogee : cela briserait l'édition
-    // indépendante des deux champs dans le formulaire.
-    // On utilise min/max pour que le calcul orbital soit toujours correct
-    // quel que soit l'ordre de saisie.
-    const double rp = R_EARTH_KM + static_cast<double>(std::min(h_perigee, h_apogee));
-    const double ra = R_EARTH_KM + static_cast<double>(std::max(h_perigee, h_apogee));
+    // r_perigee et r_apogee sont des rayons (centre Terre) en km.
+    // On utilise min/max pour le calcul, même si r_p > r_a (saisie inversée).
+    const double rp = static_cast<double>(std::min(r_perigee, r_apogee));
+    const double ra = static_cast<double>(std::max(r_perigee, r_apogee));
 
     semi_major_axis = static_cast<float>((rp + ra) / 2.0);
     eccentricity    = static_cast<float>((ra - rp) / (ra + rp));

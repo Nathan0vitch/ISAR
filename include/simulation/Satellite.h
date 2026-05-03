@@ -21,6 +21,7 @@ static constexpr double R_EARTH_KM   = 6371.0;           // km     (rayon moyen)
 static constexpr double OMEGA_EARTH  = 7.2921150e-5;     // rad/s  (rotation terrestre)
 static constexpr double J2_EARTH     = 1.08263e-3;       // coefficient J2 (aplatissement)
 static constexpr double SIM_DURATION = 3.0 * 86400.0;   // 3 jours [s]
+static constexpr double R_HILL_KM    = 924600.0;         // km     (sphère de Hill de la Terre)
 
 
 // =============================================================================
@@ -29,8 +30,8 @@ static constexpr double SIM_DURATION = 3.0 * 86400.0;   // 3 jours [s]
 struct OrbitalParams
 {
     // ── Paramètres saisis ─────────────────────────────────────────────────────
-    float h_perigee    = 400.0f;   // Altitude du périgée       [km]
-    float h_apogee     = 420.0f;   // Altitude de l'apogée      [km]
+    float r_perigee    = static_cast<float>(R_EARTH_KM + 400.0);  // Rayon périgée r_p  [km]
+    float r_apogee     = static_cast<float>(R_EARTH_KM + 420.0);  // Rayon apogée  r_a  [km]
     float inclination  =  51.6f;   // Inclinaison (i)           [°]
     float raan         =   0.0f;   // RAAN (Ω)                  [°]
     float arg_perigee  =   0.0f;   // Argument du périgée (ω)   [°]
@@ -41,7 +42,7 @@ struct OrbitalParams
     float eccentricity    = 0.0f;   // Excentricité   (e)
     float period_s        = 0.0f;   // Période orbitale (T)[s]
 
-    // Met à jour a, e, T depuis h_perigee et h_apogee.
+    // Met à jour a, e, T depuis r_perigee et r_apogee.
     void recalculate();
 };
 
