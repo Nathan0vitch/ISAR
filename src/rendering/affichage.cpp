@@ -656,9 +656,9 @@ void Planisphere::drawGraticule(DynBuf2D& buf, GLint locColor,
 
 // ── drawWaypoint ──────────────────────────────────────────────────────────────
 //
-// LOOP : dessine 3 copies horizontales du marqueur (n = -1, 0, +1),
-//   soit aux longitudes  lon − 360°, lon, lon + 360°.
-//   Le scissor OpenGL gère le clipping des copies hors panneau.
+// LOOP : dessine autant de copies horizontales du marqueur que nécessaire pour
+//   couvrir la vue entière (scroll infini). Le nombre de copies est calculé
+//   dynamiquement depuis halfVisLon(). Le scissor OpenGL gère le clipping.
 //
 // FORME :
 //   WPShape::Hexagon → hexagone régulier en GL_LINE_STRIP (7 sommets)
@@ -670,7 +670,11 @@ void Planisphere::drawWaypoint(DynBuf2D& buf, GLint locColor,
     const float margeDegs = wp.radius2D / pixPerDeg(winH) + 2.0f;
     const float hvl = halfVisLon(splitX, winW, winH, margeDegs);
 
-    for (int n = -1; n <= 1; ++n)
+    // Calcul dynamique du nombre de copies nécessaires pour couvrir la vue entière.
+    const int nMin = static_cast<int>(std::floor((ctrLon - hvl - wp.lon) / 360.0f));
+    const int nMax = static_cast<int>(std::ceil ((ctrLon + hvl - wp.lon) / 360.0f));
+
+    for (int n = nMin; n <= nMax; ++n)
     {
         float lon = wp.lon + n * 360.0f;
 

@@ -260,6 +260,15 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     }
 }
 
+// ── Caractères imprimables ─────────────────────────────────────────────────────
+// INDISPENSABLE pour la saisie texte dans ImGui (InputFloat, InputText…).
+// Avec install_callbacks=false, on doit forwarder ce callback manuellement.
+// Sans lui, les caractères tapés n'arrivent jamais dans les champs ImGui.
+static void char_callback(GLFWwindow* window, unsigned int codepoint)
+{
+    ImGui_ImplGlfw_CharCallback(window, codepoint);
+}
+
 
 // =============================================================================
 // Sources GLSL
@@ -417,6 +426,7 @@ int main()
     glfwSetCursorPosCallback      (gWindow, cursor_pos_callback);
     glfwSetScrollCallback         (gWindow, scroll_callback);
     glfwSetKeyCallback            (gWindow, key_callback);
+    glfwSetCharCallback           (gWindow, char_callback);   // ← saisie texte ImGui
 
     // ── États OpenGL ──────────────────────────────────────────────────────────
     glEnable(GL_DEPTH_TEST);
@@ -764,25 +774,33 @@ int main()
                 const glm::vec4 colFut  = { sat.color.r, sat.color.g,
                                              sat.color.b, 0.85f };
 
-                // ── 3 copies horizontales (−360°, 0°, +360°) ──────────────────
-                // Le scissor OpenGL découpe ce qui dépasse du panneau.
-                for (int n = -1; n <= 1; ++n)
+                // ── Copies horizontales couvrant toute la vue ────────────────
+                // Nombre calculé dynamiquement pour le scroll infini.
                 {
-                    const float off = static_cast<float>(n) * 360.0f;
+                    const float hvl  = gMap.halfVisLon(splitX, fbW, fbH, 5.0f);
+                    const int   nMin = static_cast<int>(std::floor((gMap.ctrLon - hvl) / 360.0f));
+                    const int   nMax = static_cast<int>(std::ceil ((gMap.ctrLon + hvl) / 360.0f));
+                    for (int n = nMin; n <= nMax; ++n)
+                    {
+                        const float off = static_cast<float>(n) * 360.0f;
 
-                    // Passé [iPastStart … iCur]
-                    drawTrackRange(iPastStart, iCur, colPast, off);
+                        // Passé [iPastStart … iCur]
+                        drawTrackRange(iPastStart, iCur, colPast, off);
 
-                    // Futur [iCur … iFutEnd]
-                    drawTrackRange(iCur, iFutEnd, colFut, off);
+                        // Futur [iCur … iFutEnd]
+                        drawTrackRange(iCur, iFutEnd, colFut, off);
+                    }
                 }
 
-                // ── Position courante : croix sur les 3 copies ────────────────
+                // ── Position courante : croix sur toutes les copies visibles ──
                 {
                     float lat, lon0;
                     sat.latLonAtTime(simTime, lat, lon0);
 
-                    for (int n = -1; n <= 1; ++n)
+                    const float hvl  = gMap.halfVisLon(splitX, fbW, fbH, 10.0f);
+                    const int   nMin = static_cast<int>(std::floor((gMap.ctrLon - hvl - lon0) / 360.0f));
+                    const int   nMax = static_cast<int>(std::ceil ((gMap.ctrLon + hvl - lon0) / 360.0f));
+                    for (int n = nMin; n <= nMax; ++n)
                     {
                         const float lon = lon0 + static_cast<float>(n) * 360.0f;
                         glm::vec2 c = gMap.project(lon, lat, splitX, fbW, fbH);
