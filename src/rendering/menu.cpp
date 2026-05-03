@@ -279,7 +279,7 @@ bool Menu::drawSatelliteForm()
             "\xe2\x9a\xa0 Apog\xc3\xa9\x65 d\xc3\xa9passe la sph\xc3\xa8re de Hill (~924 600 km)");
     if (errInverted && !errUnder)
         ImGui::TextColored(ImVec4(1.0f, 0.70f, 0.10f, 1.0f),
-            "\xe2\x9a\xa0 r_p > r_a : les rayons seront \xc3\xa9chang\xc3\xa9s");
+            "\xe2\x9a\xa0 r_p > r_a : les rayons seront \xc3\xa9" "chang\xc3\xa9s");
 
     ImGui::Spacing();
 
