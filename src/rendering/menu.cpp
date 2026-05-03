@@ -183,24 +183,24 @@ bool Menu::drawSatelliteForm()
         ImGui::TableSetupColumn("lbl", ImGuiTableColumnFlags_WidthStretch, 0.58f);
         ImGui::TableSetupColumn("val", ImGuiTableColumnFlags_WidthStretch, 0.42f);
 
-        // -- Saisies --
+        // -- Saisies (step=0 : champ texte pur, cliquer et taper la valeur) --
         tableLabel("P\xc3\xa9rig\xc3\xa9\x65 h_p [km]");           // Périgée
-        ImGui::InputFloat("##hp", &pendingOrbit.h_perigee,  10.f, 100.f, "%.1f");
+        ImGui::InputFloat("##hp",   &pendingOrbit.h_perigee,   0.f, 0.f, "%.1f");
 
         tableLabel("Apog\xc3\xa9\x65 h_a [km]");                    // Apogée
-        ImGui::InputFloat("##ha", &pendingOrbit.h_apogee,   10.f, 100.f, "%.1f");
+        ImGui::InputFloat("##ha",   &pendingOrbit.h_apogee,    0.f, 0.f, "%.1f");
 
         tableLabel("Inclinaison i [\xc2\xb0]");                     // °
-        ImGui::InputFloat("##inc", &pendingOrbit.inclination, 1.f, 10.f, "%.2f");
+        ImGui::InputFloat("##inc",  &pendingOrbit.inclination, 0.f, 0.f, "%.2f");
 
         tableLabel("RAAN \xce\xa9 [\xc2\xb0]");                     // Ω
-        ImGui::InputFloat("##raan", &pendingOrbit.raan,      1.f, 10.f, "%.2f");
+        ImGui::InputFloat("##raan", &pendingOrbit.raan,        0.f, 0.f, "%.2f");
 
         tableLabel("Arg. p\xc3\xa9rig\xc3\xa9\x65 \xcf\x89 [\xc2\xb0]"); // ω
-        ImGui::InputFloat("##argp", &pendingOrbit.arg_perigee, 1.f, 10.f, "%.2f");
+        ImGui::InputFloat("##argp", &pendingOrbit.arg_perigee, 0.f, 0.f, "%.2f");
 
         tableLabel("Anomalie vraie \xce\xbd [\xc2\xb0]");           // ν
-        ImGui::InputFloat("##nu", &pendingOrbit.true_anomaly,  1.f, 10.f, "%.2f");
+        ImGui::InputFloat("##nu",   &pendingOrbit.true_anomaly, 0.f, 0.f, "%.2f");
 
         // -- Calculés --
         ImGui::TableNextRow(); // ligne de séparation visuelle
@@ -236,19 +236,19 @@ bool Menu::drawSatelliteForm()
         ImGui::TableSetupColumn("val", ImGuiTableColumnFlags_WidthStretch, 0.42f);
 
         tableLabel("Masse m [kg]");
-        ImGui::InputFloat("##mass", &pendingPhysics.mass, 1.f, 10.f, "%.1f");
+        ImGui::InputFloat("##mass", &pendingPhysics.mass,              0.f, 0.f, "%.1f");
 
         tableLabel("Surface A [m\xc2\xb2]");                        // m²
-        ImGui::InputFloat("##area", &pendingPhysics.area, 0.001f, 0.01f, "%.4f");
+        ImGui::InputFloat("##area", &pendingPhysics.area,             0.f, 0.f, "%.4f");
 
         tableLabel("Coeff. tra\xc3\xae\x6e\xc3\xa9\x65 Cd");        // traînée
-        ImGui::InputFloat("##cd", &pendingPhysics.cd, 0.1f, 1.f, "%.2f");
+        ImGui::InputFloat("##cd",   &pendingPhysics.cd,               0.f, 0.f, "%.2f");
 
         tableLabel("Coeff. balistique \xce\xb2 [kg/m\xc2\xb2]");   // β
-        ImGui::InputFloat("##beta", &pendingPhysics.ballistic_coeff, 1.f, 10.f, "%.1f");
+        ImGui::InputFloat("##beta", &pendingPhysics.ballistic_coeff,  0.f, 0.f, "%.1f");
 
         tableLabel("Finesse parachute L/D");
-        ImGui::InputFloat("##fin", &pendingPhysics.parachute_finesse, 0.5f, 1.f, "%.1f");
+        ImGui::InputFloat("##fin",  &pendingPhysics.parachute_finesse, 0.f, 0.f, "%.1f");
 
         ImGui::EndTable();
     }

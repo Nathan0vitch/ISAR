@@ -36,10 +36,12 @@ static constexpr int    N_ORBIT   = 360;   // points sur l'ellipse statique
 // =============================================================================
 void OrbitalParams::recalculate()
 {
-    if (h_perigee > h_apogee) std::swap(h_perigee, h_apogee);
-
-    const double rp = R_EARTH_KM + static_cast<double>(h_perigee);
-    const double ra = R_EARTH_KM + static_cast<double>(h_apogee);
+    // On n'échange PAS h_perigee et h_apogee : cela briserait l'édition
+    // indépendante des deux champs dans le formulaire.
+    // On utilise min/max pour que le calcul orbital soit toujours correct
+    // quel que soit l'ordre de saisie.
+    const double rp = R_EARTH_KM + static_cast<double>(std::min(h_perigee, h_apogee));
+    const double ra = R_EARTH_KM + static_cast<double>(std::max(h_perigee, h_apogee));
 
     semi_major_axis = static_cast<float>((rp + ra) / 2.0);
     eccentricity    = static_cast<float>((ra - rp) / (ra + rp));
@@ -328,14 +330,15 @@ void Satellite::latLonAtTime(double t_s, float& lat_deg, float& lon_deg) const
 
     // Longitude inertielle (ECI)
     const double lon_eci_rad  = std::atan2(z, x);
-    // Rotation terrestre depuis t=0 (angle en radians)
+    // Rotation terrestre depuis t=0 (angle en radians, peut dépasser 2π)
     const double earth_rot    = t_s * OMEGA_EARTH;
-    // Longitude ECEF
-    double lon_ecef_rad = lon_eci_rad - earth_rot;
+    // Longitude ECEF brute (quelconque, peut être très négative ou grande)
+    const double lon_ecef_rad_raw = lon_eci_rad - earth_rot;
 
-    // Normalisation dans [−π, +π]
-    lon_ecef_rad = std::fmod(lon_ecef_rad + 3.0 * glm::pi<double>(),
-                             2.0 * glm::pi<double>()) - glm::pi<double>();
+    // Normalisation dans (−π, +π] — std::remainder gère correctement
+    // les grandes valeurs, contrairement à fmod (qui casse après ~1.5 jours).
+    const double lon_ecef_rad = std::remainder(lon_ecef_rad_raw,
+                                               2.0 * glm::pi<double>());
 
     lon_deg = static_cast<float>(lon_ecef_rad * RAD2DEG_D);
 }

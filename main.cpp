@@ -92,6 +92,12 @@ static double simSpeed  = 64.0;   // ×64 par défaut (~14s par orbite LEO)
 static bool   simPaused = false;
 static double wallPrev  = 0.0;
 
+// ── Sélecteur de périodes affichées ──────────────────────────────────────────
+// Indices : 0=1T  1=3T  2=5T  3=10T  4=tout (−1 périodes = pas de limite)
+static int         gNbPeriodsIdx  = 0;
+static const int   kPeriodMult[]  = { 1, 3, 5, 10, -1 };  // -1 = toutes
+static const char* kPeriodLabels[]= { "1T", "3T", "5T", "10T", "Tout" };
+
 
 // =============================================================================
 // Helpers
@@ -590,32 +596,39 @@ int main()
             draw_3d(dyn3, makeCross3(sat.dnECI, 0.025f), GL_LINES, locF_Color,
                     { 1.0f, 0.28f, 0.28f, 0.70f });
 
-            // ── Trajectoire J2 complète (3 jours) ──────────────────────────
-            // Rendu en dégradé : partie passée (plus sombre) / future (plus lumineuse)
+            // ── Trajectoire 3D : ±1 période orbitale autour du temps courant ──
+            // Seule une fenêtre temporelle [t−T, t+T] est affichée pour rester
+            // lisible. Passé = sombre, futur = couleur vive.
             if (!sat.trackVerts.empty())
             {
-                // On divise la trajectoire en : passée (avant simTime) et future.
-                const int   nPts  = static_cast<int>(sat.track.size());
+                const int    nPts    = static_cast<int>(sat.track.size());
                 const double dtTrack = (nPts > 1) ? (sat.track[1].t - sat.track[0].t) : 30.0;
-                const int   iCur  = std::min(static_cast<int>(simTime / dtTrack), nPts - 1);
+                const double T       = static_cast<double>(sat.orbital.period_s);
 
-                // Segment passé (depuis le début jusqu'à la position courante)
-                if (iCur > 0)
+                // Index courant
+                const int iCur = std::min(static_cast<int>(simTime / dtTrack), nPts - 1);
+
+                // Bornes ±1T clampées à [0, nPts−1]
+                const int iPast = std::max(0,       static_cast<int>((simTime - T) / dtTrack));
+                const int iFut  = std::min(nPts - 1,static_cast<int>((simTime + T) / dtTrack));
+
+                // Passé [iPast … iCur]
+                if (iCur > iPast)
                 {
-                    std::vector<float> past(sat.trackVerts.begin(),
+                    std::vector<float> past(sat.trackVerts.begin() + iPast * 3,
                                             sat.trackVerts.begin() + (iCur + 1) * 3);
                     draw_3d(dyn3, past, GL_LINE_STRIP, locF_Color,
                             { sat.color.r * 0.45f, sat.color.g * 0.45f,
-                              sat.color.b * 0.45f, 0.55f });
+                              sat.color.b * 0.45f, 0.60f });
                 }
 
-                // Segment futur (de la position courante jusqu'à la fin)
-                if (iCur < nPts - 1)
+                // Futur [iCur … iFut]
+                if (iFut > iCur)
                 {
                     std::vector<float> future(sat.trackVerts.begin() + iCur * 3,
-                                              sat.trackVerts.end());
+                                              sat.trackVerts.begin() + (iFut + 1) * 3);
                     draw_3d(dyn3, future, GL_LINE_STRIP, locF_Color,
-                            { sat.color.r, sat.color.g, sat.color.b, 0.70f });
+                            { sat.color.r, sat.color.g, sat.color.b, 0.80f });
                 }
             }
 
@@ -676,70 +689,78 @@ int main()
 
             // ── Ground tracks des satellites ──────────────────────────────────
             //
-            // Pour chaque point de la trajectoire, on calcule la lat/lon ECEF
-            // (corrigée de la rotation terrestre) et on projette sur la carte.
-            // On coupe le segment à chaque franchissement de l'antiméridien
-            // (saut de lon > 180°).
+            // Nombre de périodes affiché : contrôlé par gNbPeriodsIdx.
+            // La fenêtre temporelle est [simTime − n×T, simTime + n×T], ou
+            // [0, SIM_DURATION] si "Tout" est sélectionné.
+            //
+            // Coupure antiméridien : on détecte un saut |Δlon| > 90° entre deux
+            // points consécutifs et on démarre un nouveau segment (les orbites LEO
+            // avancent de ~1°/s max, donc 90° signifie bien un wrap ±180°).
             for (const auto& sat : gSatellites)
             {
                 if (sat.track.empty()) continue;
 
-                const int   nPts     = static_cast<int>(sat.track.size());
+                const int    nPts    = static_cast<int>(sat.track.size());
                 const double dtTrack = (nPts > 1) ? (sat.track[1].t - sat.track[0].t) : 30.0;
-                const int   iCur     = std::min(static_cast<int>(simTime / dtTrack), nPts - 1);
+                const int    iCur    = std::min(static_cast<int>(simTime / dtTrack), nPts - 1);
+                const double T       = static_cast<double>(sat.orbital.period_s);
+                const int    mult    = kPeriodMult[gNbPeriodsIdx];  // -1 = tout
 
-                // Sous-échantillonnage (1 point sur 2 → ~4320 points, léger)
+                // Bornes de la fenêtre en indices
+                int iPastStart, iFutEnd;
+                if (mult < 0) {
+                    iPastStart = 0;
+                    iFutEnd    = nPts - 1;
+                } else {
+                    iPastStart = std::max(0,       static_cast<int>((simTime - mult * T) / dtTrack));
+                    iFutEnd    = std::min(nPts - 1,static_cast<int>((simTime + mult * T) / dtTrack));
+                }
+
+                // Sous-échantillonnage : 1 point sur 2 (~4320 pts max)
                 const int stride = 2;
 
-                // Lambda : dessine un segment de ground track
+                // Lambda : pousse le segment accumulé vers le GPU et le vide
                 auto flushSeg = [&](std::vector<float>& seg, glm::vec4 col) {
                     if (seg.size() >= 4)
                         draw_2d(dyn2, seg, GL_LINE_STRIP, loc2D_Color, col);
                     seg.clear();
                 };
 
-                // ── Trajectoire passée (plus sombre) ────────────────────────
+                // Lambda : parcourt [iFrom, iTo] par stride et dessine les
+                // segments en coupant à l'antiméridien.
+                auto drawTrackRange = [&](int iFrom, int iTo, glm::vec4 col)
                 {
                     std::vector<float> seg;
                     float prevLon = -9999.0f;
-                    glm::vec4 colPast = { sat.color.r * 0.55f, sat.color.g * 0.55f,
-                                         sat.color.b * 0.55f, 0.65f };
-                    for (int i = 0; i <= iCur; i += stride)
+                    for (int i = iFrom; i <= iTo; i += stride)
                     {
                         float lat, lon;
                         sat.latLonAtTime(sat.track[i].t, lat, lon);
-                        if (prevLon > -9000.0f && std::abs(lon - prevLon) > 150.0f)
-                            flushSeg(seg, colPast);
+                        // Coupure antiméridien : saut > 90° entre deux points
+                        if (prevLon > -9000.0f && std::abs(lon - prevLon) > 90.0f)
+                            flushSeg(seg, col);
                         glm::vec2 px = gMap.project(lon, lat, splitX, fbW, fbH);
-                        seg.push_back(px.x); seg.push_back(px.y);
+                        seg.push_back(px.x);
+                        seg.push_back(px.y);
                         prevLon = lon;
                     }
-                    flushSeg(seg, colPast);
-                }
+                    flushSeg(seg, col);
+                };
 
-                // ── Trajectoire future (plus lumineuse) ──────────────────────
-                {
-                    std::vector<float> seg;
-                    float prevLon = -9999.0f;
-                    glm::vec4 colFut = { sat.color.r, sat.color.g, sat.color.b, 0.80f };
-                    for (int i = iCur; i < nPts; i += stride)
-                    {
-                        float lat, lon;
-                        sat.latLonAtTime(sat.track[i].t, lat, lon);
-                        if (prevLon > -9000.0f && std::abs(lon - prevLon) > 150.0f)
-                            flushSeg(seg, colFut);
-                        glm::vec2 px = gMap.project(lon, lat, splitX, fbW, fbH);
-                        seg.push_back(px.x); seg.push_back(px.y);
-                        prevLon = lon;
-                    }
-                    flushSeg(seg, colFut);
-                }
+                // ── Passé [iPastStart … iCur] — couleur atténuée ──────────────
+                drawTrackRange(iPastStart, iCur,
+                    { sat.color.r * 0.55f, sat.color.g * 0.55f,
+                      sat.color.b * 0.55f, 0.70f });
 
-                // ── Position courante sur le planisphère (croix) ─────────────
+                // ── Futur [iCur … iFutEnd] — couleur vive ─────────────────────
+                drawTrackRange(iCur, iFutEnd,
+                    { sat.color.r, sat.color.g, sat.color.b, 0.85f });
+
+                // ── Position courante (croix) ──────────────────────────────────
                 {
                     float lat, lon;
                     sat.latLonAtTime(simTime, lat, lon);
-                    glm::vec2 c  = gMap.project(lon, lat, splitX, fbW, fbH);
+                    glm::vec2 c = gMap.project(lon, lat, splitX, fbW, fbH);
                     const float r = 7.0f;
                     std::vector<float> cross = {
                         c.x - r, c.y,     c.x + r, c.y,
@@ -871,7 +892,16 @@ int main()
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Augmenter vitesse (+)");
 
                 ImGui::SameLine(0.0f, 16.0f);
-                ImGui::TextDisabled("[Espace] [+/-] [R=reset]");
+                // Sélecteur du nombre de périodes affichées sur la carte
+                ImGui::TextDisabled("Trace:");
+                ImGui::SameLine(0.0f, 4.0f);
+                ImGui::SetNextItemWidth(58.0f);
+                ImGui::Combo("##nbT", &gNbPeriodsIdx, kPeriodLabels, 5);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Nombre de périodes affichées\nsur la trace au sol (planisphère)");
+
+                ImGui::SameLine(0.0f, 12.0f);
+                ImGui::TextDisabled("[Espace] [+/-] [R]");
             }
             ImGui::End();
 
