@@ -215,42 +215,48 @@ static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
 //   R        : réinitialiser le temps
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
+    // Forward vers ImGui en premier — il met à jour WantCaptureKeyboard.
     ImGui_ImplGlfw_KeyCallback(window, key, scancode, action, mods);
 
-    if (action == GLFW_PRESS || action == GLFW_REPEAT)
+    if (action != GLFW_PRESS && action != GLFW_REPEAT) return;
+
+    // ESC ferme toujours, même si un champ ImGui est focalisé.
+    if (key == GLFW_KEY_ESCAPE) {
+        glfwSetWindowShouldClose(window, true);
+        return;
+    }
+
+    // Les raccourcis de simulation ne s'activent QUE si ImGui n'a pas le focus
+    // clavier, pour ne pas interférer avec la saisie dans les formulaires.
+    if (ImGui::GetIO().WantCaptureKeyboard) return;
+
+    switch (key)
     {
-        switch (key)
-        {
-        case GLFW_KEY_ESCAPE:
-            glfwSetWindowShouldClose(window, true);
-            break;
+    case GLFW_KEY_SPACE:
+        if (action == GLFW_PRESS)
+            simPaused = !simPaused;
+        break;
 
-        case GLFW_KEY_SPACE:
-            if (action == GLFW_PRESS)
-                simPaused = !simPaused;
-            break;
+    // Accélérer (+ pavé num ou = azerty)
+    case GLFW_KEY_KP_ADD:
+    case GLFW_KEY_EQUAL:
+        simSpeed = std::min(simSpeed * 2.0, 16384.0);
+        break;
 
-        // Accélérer (+ pavé num ou = / + azerty)
-        case GLFW_KEY_KP_ADD:
-        case GLFW_KEY_EQUAL:       // = ou + (sans shift sur azerty)
-            simSpeed = std::min(simSpeed * 2.0, 16384.0);
-            break;
+    // Ralentir (- pavé num ou - azerty)
+    case GLFW_KEY_KP_SUBTRACT:
+    case GLFW_KEY_MINUS:
+        simSpeed = std::max(simSpeed / 2.0, 1.0);
+        break;
 
-        // Ralentir (- pavé num ou - azerty)
-        case GLFW_KEY_KP_SUBTRACT:
-        case GLFW_KEY_MINUS:
-            simSpeed = std::max(simSpeed / 2.0, 1.0);
-            break;
+    // Réinitialiser le temps de simulation
+    case GLFW_KEY_R:
+        if (action == GLFW_PRESS)
+            simTime = 0.0;
+        break;
 
-        // Réinitialiser le temps de simulation
-        case GLFW_KEY_R:
-            if (action == GLFW_PRESS)
-                simTime = 0.0;
-            break;
-
-        default:
-            break;
-        }
+    default:
+        break;
     }
 }
 
@@ -728,7 +734,9 @@ int main()
 
                 // Lambda : parcourt [iFrom, iTo] par stride et dessine les
                 // segments en coupant à l'antiméridien.
-                auto drawTrackRange = [&](int iFrom, int iTo, glm::vec4 col)
+                // lonOffset : −360, 0 ou +360 pour les 3 copies horizontales.
+                auto drawTrackRange = [&](int iFrom, int iTo,
+                                          glm::vec4 col, float lonOffset)
                 {
                     std::vector<float> seg;
                     float prevLon = -9999.0f;
@@ -736,7 +744,9 @@ int main()
                     {
                         float lat, lon;
                         sat.latLonAtTime(sat.track[i].t, lat, lon);
+                        lon += lonOffset;
                         // Coupure antiméridien : saut > 90° entre deux points
+                        // (l'offset est uniforme → la détection reste correcte)
                         if (prevLon > -9000.0f && std::abs(lon - prevLon) > 90.0f)
                             flushSeg(seg, col);
                         glm::vec2 px = gMap.project(lon, lat, splitX, fbW, fbH);
@@ -747,28 +757,44 @@ int main()
                     flushSeg(seg, col);
                 };
 
-                // ── Passé [iPastStart … iCur] — couleur atténuée ──────────────
-                drawTrackRange(iPastStart, iCur,
-                    { sat.color.r * 0.55f, sat.color.g * 0.55f,
-                      sat.color.b * 0.55f, 0.70f });
+                // Couleurs passé / futur
+                const glm::vec4 colPast = { sat.color.r * 0.55f,
+                                             sat.color.g * 0.55f,
+                                             sat.color.b * 0.55f, 0.70f };
+                const glm::vec4 colFut  = { sat.color.r, sat.color.g,
+                                             sat.color.b, 0.85f };
 
-                // ── Futur [iCur … iFutEnd] — couleur vive ─────────────────────
-                drawTrackRange(iCur, iFutEnd,
-                    { sat.color.r, sat.color.g, sat.color.b, 0.85f });
-
-                // ── Position courante (croix) ──────────────────────────────────
+                // ── 3 copies horizontales (−360°, 0°, +360°) ──────────────────
+                // Le scissor OpenGL découpe ce qui dépasse du panneau.
+                for (int n = -1; n <= 1; ++n)
                 {
-                    float lat, lon;
-                    sat.latLonAtTime(simTime, lat, lon);
-                    glm::vec2 c = gMap.project(lon, lat, splitX, fbW, fbH);
-                    const float r = 7.0f;
-                    std::vector<float> cross = {
-                        c.x - r, c.y,     c.x + r, c.y,
-                        c.x,     c.y - r, c.x,     c.y + r
-                    };
-                    glLineWidth(2.0f);
-                    draw_2d(dyn2, cross, GL_LINES, loc2D_Color, sat.color);
-                    glLineWidth(1.0f);
+                    const float off = static_cast<float>(n) * 360.0f;
+
+                    // Passé [iPastStart … iCur]
+                    drawTrackRange(iPastStart, iCur, colPast, off);
+
+                    // Futur [iCur … iFutEnd]
+                    drawTrackRange(iCur, iFutEnd, colFut, off);
+                }
+
+                // ── Position courante : croix sur les 3 copies ────────────────
+                {
+                    float lat, lon0;
+                    sat.latLonAtTime(simTime, lat, lon0);
+
+                    for (int n = -1; n <= 1; ++n)
+                    {
+                        const float lon = lon0 + static_cast<float>(n) * 360.0f;
+                        glm::vec2 c = gMap.project(lon, lat, splitX, fbW, fbH);
+                        const float r = 7.0f;
+                        std::vector<float> cross = {
+                            c.x - r, c.y,     c.x + r, c.y,
+                            c.x,     c.y - r, c.x,     c.y + r
+                        };
+                        glLineWidth(2.0f);
+                        draw_2d(dyn2, cross, GL_LINES, loc2D_Color, sat.color);
+                        glLineWidth(1.0f);
+                    }
                 }
             }
 
