@@ -141,7 +141,6 @@
   <ItemGroup>
     <ClCompile Include="glad.c" />
     <ClCompile Include="Main.cpp" />
-    <ClCompile Include="src\nrlmsise-00.c" />
     <ClCompile Include="src\rendering\affichage.cpp" />
     <ClCompile Include="src\rendering\menu.cpp" />
     <ClCompile Include="src\simulation\Satellite.cpp" />
